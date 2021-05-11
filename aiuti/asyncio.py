@@ -25,20 +25,20 @@ from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from typing import (
-    Iterator, AsyncIterator, Callable, Set, Awaitable, Optional,
+    Iterable, AsyncIterable, Callable, Set, Awaitable, Optional,
     Generic,
 )
 
-from .typing import T
+from .typing import T, Yields, AYields
 
 logger = logging.getLogger(__name__)
 
 _DONE = object()
 
 
-async def to_async_iter(iterable: Iterator[T]) -> AsyncIterator[T]:
+async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
     """
-    Convert the given iterator from synchronous to asynchrounous by
+    Convert the given iterable from synchronous to asynchrounous by
     iterating it in a background thread.
 
     This can be useful for interacting with libraries for APIs that do
@@ -50,7 +50,7 @@ async def to_async_iter(iterable: Iterator[T]) -> AsyncIterator[T]:
 
     >>> import requests
 
-    >>> def user_names() -> Iterator[str]:
+    >>> def user_names() -> Yields[str]:
     ...     for uid in range(3):
     ...         url = f'https://jsonplaceholder.typicode.com/users/{uid + 1}'
     ...         yield requests.get(url).json()['name']
@@ -88,9 +88,9 @@ async def to_async_iter(iterable: Iterator[T]) -> AsyncIterator[T]:
         await future  # Bubble any errors
 
 
-def to_sync_iter(iterable: AsyncIterator[T]) -> Iterator[T]:
+def to_sync_iter(iterable: AsyncIterable[T]) -> Yields[T]:
     """
-    Convert the given iterator from asynchronous to synchrounous by
+    Convert the given iterable from asynchronous to synchrounous by
     by using a background thread running a new event loop to iterate it.
 
     This can be useful for providing a synchronous interface to a new
@@ -108,7 +108,7 @@ def to_sync_iter(iterable: AsyncIterator[T]) -> Iterator[T]:
     ...         resp = await client.get(url)
     ...         return resp.json()['name']
 
-    >>> async def user_names() -> AsyncIterator[str]:
+    >>> async def user_names() -> AYields[str]:
     ...     for name in await aio.gather(*map(user_name, range(3))):
     ...         yield name
 
