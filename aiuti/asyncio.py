@@ -13,8 +13,10 @@ __all__ = [
     'threadsafe_async_cache',
     'buffer_until_timeout',
     'BufferAsyncCalls',
+    'DaemonTask',
 ]
 
+import sys
 import queue
 import logging
 import asyncio as aio
@@ -304,7 +306,12 @@ class BufferAsyncCalls(Generic[T]):
         self.event.set()
 
         #: Task which is infinitely processing the queue
-        self._waiting = self.loop.create_task(self._waiter())
+        self._waiting = DaemonTask(
+            self._waiter(),
+            loop=self.loop,
+            name=f"Buffering {self.func!r}",
+        )
+        # self._waiting = self.loop.create_task(self._waiter())
         #: Current task that is waiting for a new element from the queue
         self._getting: Optional[aio.Task] = None
 
@@ -342,9 +349,6 @@ class BufferAsyncCalls(Generic[T]):
         """
         Simple loop which tries to process the queue infinitely using
         :meth:`_process_queue`. This is spawned automatically upon
-
-        TODO: Figure out how to prevent RuntimeErrors when the event
-              is stopped as this task never finishes.
         """
         while True:
             await self._process_queue()
@@ -355,7 +359,10 @@ class BufferAsyncCalls(Generic[T]):
         execute the function on timeout or cancellation.
         """
         # Get first element, block infinitely until one appears
-        inputs = {await self.q.get()}
+        try:
+            inputs = {await self.q.get()}
+        except RuntimeError:  # Most likely loop shutdown
+            return
         # Keep adding new args until the function has run successfully
         while not self.event.is_set():
             # Schedule the q.get() and save it as an attribute so it
@@ -390,3 +397,20 @@ class BufferAsyncCalls(Generic[T]):
         configured :attr:`timeout`.
         """
         return self.loop.create_task(aio.wait_for(coro, self.timeout))
+
+
+class DaemonTask(aio.Task):
+    """
+    Custom :class:`asyncio.Task` which is meant to run forever and
+    therefore doesn't warn when it is still pending at loop shutdown.
+    """
+
+    if sys.version_info <= (3, 8):
+
+        # Ignore name arg when it isn't available for compatibility
+        def __init__(self, coro, *, loop=None, name=None):
+            super().__init__(coro, loop=loop)
+
+    # Skip the __del__ defined by aio.Task which does the logging and
+    # then calls super()
+    __del__ = aio.Task.__base__.__del__  # noqa
