@@ -88,7 +88,9 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
         await future  # Bubble any errors
 
 
-def to_sync_iter(iterable: AsyncIterable[T]) -> Yields[T]:
+def to_sync_iter(iterable: AsyncIterable[T],
+                 *,
+                 loop: aio.AbstractEventLoop = None) -> Yields[T]:
     """
     Convert the given iterable from asynchronous to synchrounous by
     by using a background thread running a new event loop to iterate it.
@@ -120,7 +122,14 @@ def to_sync_iter(iterable: AsyncIterable[T]) -> Yields[T]:
     Leanne Graham
     Ervin Howell
     Clementine Bauch
+
+    :param iterable: Asynchonrous iterable to process
+    :param loop: Optional specific loop to use to process the iterable
     """
+
+    def _set_loop_and_queue_elements():
+        aio.set_event_loop(loop)
+        return loop.run_until_complete(_queue_elements())
 
     async def _queue_elements():
         try:
@@ -129,11 +138,13 @@ def to_sync_iter(iterable: AsyncIterable[T]) -> Yields[T]:
         finally:
             put(_DONE)
 
+    if loop is None:
+        loop = aio.new_event_loop()
+
     q = queue.Queue()
-    loop = aio.new_event_loop()
     put = partial(loop.call_soon_threadsafe, q.put_nowait)
     with ThreadPoolExecutor(1) as pool:
-        future = pool.submit(loop.run_until_complete, _queue_elements())
+        future = pool.submit(_set_loop_and_queue_elements)
         try:
             while True:
                 i = q.get()
