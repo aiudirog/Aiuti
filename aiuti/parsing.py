@@ -1,3 +1,11 @@
+"""
+Parsing
+=======
+
+This module contains various useful tools for parsing input data.
+
+"""
+
 __all__ = ['parse_to_dict']
 
 import ast
