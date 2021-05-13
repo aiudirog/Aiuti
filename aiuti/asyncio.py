@@ -8,6 +8,8 @@ common and awkward tasks in Asyncio.
 """
 
 __all__ = [
+    'gather_excs',
+    'raise_first_exc',
     'to_async_iter',
     'to_sync_iter',
     'threadsafe_async_cache',
@@ -25,7 +27,7 @@ from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from typing import (
-    Iterable, AsyncIterable, Callable, Set, Awaitable, Optional,
+    Iterable, AsyncIterable, Callable, Set, Awaitable, Optional, Type,
     Generic,
 )
 
@@ -34,6 +36,92 @@ from .typing import T, Yields, AYields
 logger = logging.getLogger(__name__)
 
 _DONE = object()
+
+
+async def gather_excs(aws: Iterable[Awaitable],
+                      only: Type[T] = BaseException) -> AYields[T]:
+    """
+    Gather the given awaitables and yield any exceptions they raise.
+
+    This is useful when spawning a lot of tasks and you only need to
+    know if any of them error.
+
+    >>> async def x():
+    ...     await aio.sleep(0.01)
+
+    >>> async def e():
+    ...     await aio.sleep(0.01)
+    ...     raise RuntimeError("This failed")
+
+    >>> async def show_errors(excs: AYields[BaseException]):
+    ...     async for exc in excs:
+    ...         print(type(exc).__name__ + ':', *exc.args)
+
+    >>> run = aio.get_event_loop().run_until_complete
+
+    >>> run(show_errors(gather_excs([x(), e()])))
+    RuntimeError: This failed
+
+    A filter can be applied to the specific kind of exception to look
+    for. Here, no ValueErrors were raised so there is no output:
+
+    >>> run(show_errors(gather_excs([x(), e()], only=ValueError)))
+
+    Switch it to RuntimeError or a parent class and it will show again:
+
+    >>> run(show_errors(gather_excs([x(), e()], only=RuntimeError)))
+    RuntimeError: This failed
+
+    :param aws: Awaitables to gather
+    :param only:
+        Optional specific type of exceptions to filter on and yield
+    """
+    for res in await aio.gather(*aws, return_exceptions=True):
+        if isinstance(res, only):
+            yield res
+
+
+async def raise_first_exc(aws: Iterable[Awaitable],
+                          only: Type[T] = BaseException):
+    """
+    Gather the given awaitables using :func:`gather_excs` and raise the
+    first exception encountered.
+
+    This is useful when you don't need the results of any tasks but need
+    to know if there was at least one exception.
+
+    >>> async def x():
+    ...     await aio.sleep(0.01)
+
+    >>> async def e():
+    ...     await aio.sleep(0.01)
+    ...     raise RuntimeError("This failed")
+
+    >>> run = aio.get_event_loop().run_until_complete
+
+    >>> run(raise_first_exc([x(), e()]))
+    Traceback (most recent call last):
+    ...
+    RuntimeError: This failed
+
+    A filter can be applied to the specific kind of exception to look
+    for. Here, no ValueErrors were raised so there is no output:
+
+    >>> run(raise_first_exc([x(), e()], only=ValueError))
+
+    Switch it to RuntimeError or a parent class and it will raise again:
+
+    >>> run(raise_first_exc([x(), e()], only=RuntimeError))
+    Traceback (most recent call last):
+    ...
+    RuntimeError: This failed
+
+    :param aws: Awaitables to gather
+    :param only:
+        Optional specific type of exceptions to filter on and raise
+    """
+    async for exc in gather_excs(aws, only):
+        raise exc
 
 
 async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
