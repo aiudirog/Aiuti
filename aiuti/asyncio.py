@@ -462,6 +462,8 @@ class BufferAsyncCalls(Generic[T]):
             inputs = {await self.q.get()}
         except RuntimeError:  # Most likely loop shutdown
             return
+        else:
+            self.q.task_done()
         # Keep adding new args until the function has run successfully
         while not self.event.is_set():
             # Schedule the q.get() and save it as an attribute so it
@@ -473,6 +475,8 @@ class BufferAsyncCalls(Generic[T]):
                 inputs.add(await self._getting)
             except (aio.TimeoutError, aio.CancelledError):
                 await self._run_func(inputs)
+            else:
+                self.q.task_done()
 
     async def _run_func(self, inputs: Set[T]):
         """
