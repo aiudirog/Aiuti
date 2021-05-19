@@ -176,6 +176,21 @@ def test_threaded_duplicate_lock(flock: FileLock,
     assert not flock2.is_locked
 
 
+def test_nonblocking(flock: FileLock):
+    """
+    Verify lock is not acquired with blocking=False and acquire returns
+    False.
+    """
+    flock.acquire()
+    assert flock.is_locked
+
+    assert not flock.acquire(blocking=False)
+    assert flock.is_locked
+
+    flock.release()
+    assert not flock.is_locked
+
+
 def test_timeout(flock: FileLock):
     """Verify lock is not acquired on timeout and acquire returns False."""
     flock.acquire()
