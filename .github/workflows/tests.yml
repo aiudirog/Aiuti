@@ -3,9 +3,6 @@ name: tests
 on:
   pull_request:
   push:
-  schedule:
-    # Test master every Saturday at midnight to verify dependencies
-    - cron:  '0 0 * * 6'
 
 jobs:
   flake8:
@@ -26,10 +23,11 @@ jobs:
   test:
     name: Test
     needs: flake8
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         python: ['3.6', '3.7', '3.8', '3.9', 'pypy3']
+        os: ['ubuntu-latest', 'macOS-latest', 'windows-latest']
     steps:
       - uses: actions/checkout@v1
       - name: Set Up Python
