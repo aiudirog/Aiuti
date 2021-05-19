@@ -342,7 +342,7 @@ def buffer_until_timeout(func: Callable[[Set[T]], Awaitable[None]] = None,
     >>> for i in range(5):
     ...     buffer(i)
 
-    >>> aio.get_event_loop().run_until_complete(aio.sleep(0.2))
+    >>> aio.get_event_loop().run_until_complete(aio.sleep(0.5))
     Buffered: {0, 1, 2, 3, 4}
 
     Another function can also wait for all elements to be processed
