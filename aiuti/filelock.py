@@ -154,7 +154,7 @@ class BaseFileLock(abc.ABC):
         try:
             while True:
                 _logger.debug('Attempting to acquire lock %s on %s', lid, fn)
-                self._acquire(block=timeout < 0)
+                self._acquire(block=blocking and timeout < 0)
 
                 if self.is_locked:
                     _logger.info('Lock %s acquired on %s', lid, fn)

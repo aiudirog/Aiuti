@@ -191,6 +191,19 @@ def test_nonblocking(flock: FileLock):
     assert not flock.is_locked
 
 
+def test_nonblocking_multiple_locks(flock: FileLock, flock2: FileLock):
+    """Same as test_nonblocking but with multiple file locks."""
+    flock.acquire()
+    assert flock.is_locked
+
+    assert not flock2.acquire(blocking=False)
+    assert flock.is_locked
+    assert not flock2.is_locked
+
+    flock.release()
+    assert not flock.is_locked
+
+
 def test_timeout(flock: FileLock):
     """Verify lock is not acquired on timeout and acquire returns False."""
     flock.acquire()
