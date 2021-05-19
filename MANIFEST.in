@@ -1,2 +1,8 @@
+recursive-include aiuti *
+global-exclude test_*.py
+global-exclude tests
+global-exclude **tests/*.py
+global-exclude __pycache__
+global-exclude *.py[co]
 include versioneer.py
 include aiuti/_version.py
