@@ -5,5 +5,6 @@ API
     :maxdepth: 2
 
     asyncio
+    filelock
     parsing
     typing
