@@ -32,6 +32,7 @@ from typing import (
 )
 
 from .typing import T, Yields, AYields
+from .itertools import exhaust
 
 logger = logging.getLogger(__name__)
 
@@ -421,6 +422,23 @@ class BufferAsyncCalls(Generic[T]):
         """
         self.event.clear()
         self.loop.call_soon_threadsafe(self.q.put_nowait, _arg)
+
+    def map(self, _args: Iterable[T]):
+        """
+        Place an iterable of arguments onto the queue to be processed.
+
+        >>> @buffer_until_timeout(timeout=0.1)
+        ... async def buffer(args: Set[int]):
+        ...     print("Buffered:", args)
+
+        >>> buffer.map(range(5))
+
+        >>> aio.get_event_loop().run_until_complete(buffer.wait())
+        Buffered: {0, 1, 2, 3, 4}
+
+        """
+        self.event.clear()
+        self.loop.call_soon_threadsafe(exhaust, map(self.q.put_nowait, _args))
 
     async def wait(self, *, cancel: bool = True):
         """
