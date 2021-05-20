@@ -15,7 +15,7 @@ __all__ = [
 
 import operator as op
 from collections import deque
-from itertools import tee, compress, cycle
+from itertools import tee, compress
 from typing import Tuple, Iterable, Iterator, Callable, Union, Any
 
 from .typing import T
@@ -46,6 +46,7 @@ def split(
     iterators: one where with the values where the condition is True
     and one where with the values where the condition is False.
 
+    >>> from itertools import cycle
     >>> evens, odds = split(range(5), cycle((True, False)))
     >>> list(evens)
     [0, 2, 4]
