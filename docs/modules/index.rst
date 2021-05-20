@@ -6,5 +6,6 @@ API
 
     asyncio
     filelock
+    itertools
     parsing
     typing
