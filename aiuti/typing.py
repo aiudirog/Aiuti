@@ -17,13 +17,16 @@ import errors on older versions of Python:
 
 __all__ = [
     'Literal', 'Protocol', 'TypedDict',
-    'MaybeIter', 'Yields', 'AYields',
+    'MaybeIter', 'MaybeAwaitable', 'Yields', 'AYields',
     'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co',
 ]
 
 import sys
 import logging
-from typing import TypeVar, Dict, Union, Iterable, Generator, AsyncGenerator
+from typing import (
+    TypeVar, Dict, Union, Iterable, Awaitable,
+    Generator, AsyncGenerator,
+)
 
 try:
     import typing_extensions as typing_exts
@@ -79,6 +82,9 @@ VT_co = TypeVar('VT_co', covariant=True)
 #: Generic type for an object which may be a single value of a given
 #: type or an iterable of that type
 MaybeIter = Union[T, Iterable[T]]
+
+#: Generic type for an object which could be wrapped in an awaitable
+MaybeAwaitable = Union[T, Awaitable[T]]
 
 #: Generic type for a Generator which only yields
 #:
