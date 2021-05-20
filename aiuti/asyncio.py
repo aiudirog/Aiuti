@@ -423,9 +423,32 @@ class BufferAsyncCalls(Generic[T]):
         self.event.clear()
         self.loop.call_soon_threadsafe(self.q.put_nowait, _arg)
 
+    def await_(self, _arg: Awaitable[T]):
+        """
+        Schedule the given awaitable to be be put onto the queue after
+        it has been awaited.
+
+        >>> @buffer_until_timeout(timeout=0.1)
+        ... async def buffer(args: Set[int]):
+        ...     print("Buffered:", args)
+
+        >>> async def delay(x: T) -> T:
+        ...     await aio.sleep(0)
+        ...     return x
+
+        >>> for i in range(5):
+        ...     buffer.await_(delay(i))
+
+        >>> aio.get_event_loop().run_until_complete(buffer.wait())
+        Buffered: {0, 1, 2, 3, 4}
+        """
+        self.event.clear()
+        async def wait_and_put(): self.q.put_nowait(await _arg)
+        aio.run_coroutine_threadsafe(wait_and_put(), self.loop)
+
     def map(self, _args: Iterable[T]):
         """
-        Place an iterable of arguments onto the queue to be processed.
+        Place an iterable of args onto the queue to be processed.
 
         >>> @buffer_until_timeout(timeout=0.1)
         ... async def buffer(args: Set[int]):
@@ -439,6 +462,29 @@ class BufferAsyncCalls(Generic[T]):
         """
         self.event.clear()
         self.loop.call_soon_threadsafe(exhaust, map(self.q.put_nowait, _args))
+
+    def amap(self, _args: AsyncIterable[T]):
+        """
+        Schedule an async iterable of args to be put onto the queue.
+
+        >>> @buffer_until_timeout(timeout=0.1)
+        ... async def buffer(args: Set[int]):
+        ...     print("Buffered:", args)
+
+        >>> buffer.amap(to_async_iter(range(5)))
+
+        >>> aio.get_event_loop().run_until_complete(buffer.wait())
+        Buffered: {0, 1, 2, 3, 4}
+
+        """
+        self.event.clear()
+
+        async def iter_and_put():
+            put = self.q.put_nowait
+            async for arg in _args:
+                put(arg)
+
+        aio.run_coroutine_threadsafe(iter_and_put(), self.loop)
 
     async def wait(self, *, cancel: bool = True):
         """
@@ -481,6 +527,7 @@ class BufferAsyncCalls(Generic[T]):
         except RuntimeError:  # Most likely loop shutdown
             return
         else:
+            self.event.clear()  # Ensure cleared in case previous cancel
             self.q.task_done()
         # Keep adding new args until the function has run successfully
         while not self.event.is_set():
