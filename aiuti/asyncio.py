@@ -27,12 +27,11 @@ from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from typing import (
-    Iterable, AsyncIterable, Callable, Set, Awaitable, Optional, Type,
-    Generic,
+    Iterator, Iterable, AsyncIterable, Callable, Set, Awaitable, Optional,
+    Type, Generic,
 )
 
 from .typing import T, Yields, AYields
-from .itertools import exhaust
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +155,13 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
     Ervin Howell
     Clementine Bauch
     """
+
+    # Quick optimization: if it isn't an iterator, just yield from
+    # it directly to avoid using a background thread
+    if not isinstance(iterable, Iterator):
+        for x in iterable:
+            yield x
+        return
 
     def _queue_elements():
         try:
@@ -399,7 +405,10 @@ class BufferAsyncCalls(Generic[T]):
         self.loop = aio.get_event_loop()
 
         #: Asyncio queue which new arguments will be placed in
-        self.q = aio.Queue()
+        #: Arguments are passed as async iterables (the most complex
+        #: way of providing arguments) to ensure all elements are
+        #: processed on time while avoiding deadlocks.
+        self.q: 'aio.Queue[AsyncIterable[T]]' = aio.Queue()
         #: Asyncio event that is set when all current arguments have
         #: been processed and cleared whenever a new one is added.
         self.event = aio.Event()
@@ -411,7 +420,6 @@ class BufferAsyncCalls(Generic[T]):
             loop=self.loop,
             name=f"Buffering {self.func!r}",
         )
-        # self._waiting = self.loop.create_task(self._waiter())
         #: Current task that is waiting for a new element from the queue
         self._getting: Optional[aio.Task] = None
 
@@ -420,8 +428,7 @@ class BufferAsyncCalls(Generic[T]):
         Place the given argument on the queue to be processed on the
         next execution of the function.
         """
-        self.event.clear()
-        self.loop.call_soon_threadsafe(self.q.put_nowait, _arg)
+        self._put(_obj_to_aiter(_arg))
 
     def await_(self, _arg: Awaitable[T]):
         """
@@ -442,9 +449,7 @@ class BufferAsyncCalls(Generic[T]):
         >>> aio.get_event_loop().run_until_complete(buffer.wait())
         Buffered: {0, 1, 2, 3, 4}
         """
-        self.event.clear()
-        async def wait_and_put(): self.q.put_nowait(await _arg)
-        aio.run_coroutine_threadsafe(wait_and_put(), self.loop)
+        self._put(_awaitable_to_aiter(_arg))
 
     def map(self, _args: Iterable[T]):
         """
@@ -460,8 +465,7 @@ class BufferAsyncCalls(Generic[T]):
         Buffered: {0, 1, 2, 3, 4}
 
         """
-        self.event.clear()
-        self.loop.call_soon_threadsafe(exhaust, map(self.q.put_nowait, _args))
+        self._put(to_async_iter(_args))
 
     def amap(self, _args: AsyncIterable[T]):
         """
@@ -477,14 +481,7 @@ class BufferAsyncCalls(Generic[T]):
         Buffered: {0, 1, 2, 3, 4}
 
         """
-        self.event.clear()
-
-        async def iter_and_put():
-            put = self.q.put_nowait
-            async for arg in _args:
-                put(arg)
-
-        aio.run_coroutine_threadsafe(iter_and_put(), self.loop)
+        self._put(_args)
 
     async def wait(self, *, cancel: bool = True):
         """
@@ -499,6 +496,7 @@ class BufferAsyncCalls(Generic[T]):
             to be met before the function is called if it hasn't been
             already.
         """
+        await self.q.join()  # Process all queued tasks
         if cancel and self._getting and not self._getting.done():
             # Cancel the current q.get to avoid waiting for timeout
             # The sleep(0) forces task switching to ensure that
@@ -506,6 +504,7 @@ class BufferAsyncCalls(Generic[T]):
             # elements off the queue
             await aio.sleep(0)
             self._getting.cancel()
+        # Wait for the function to finish processing
         await self.event.wait()
 
     async def _waiter(self):
@@ -521,9 +520,18 @@ class BufferAsyncCalls(Generic[T]):
         Internal method to retrieve all current elements from queue and
         execute the function on timeout or cancellation.
         """
+        inputs: Set[T] = set()
+
+        async def _load_inputs(iterable: AsyncIterable[T]):
+            try:
+                async for i in iterable:
+                    inputs.add(i)
+            except BaseException:  # noqa
+                logger.exception("Failed to get args from: %r", iterable)
+
         # Get first element, block infinitely until one appears
         try:
-            inputs = {await self.q.get()}
+            input_gens = [_load_inputs(await self.q.get())]
         except RuntimeError:  # Most likely loop shutdown
             return
         else:
@@ -531,13 +539,19 @@ class BufferAsyncCalls(Generic[T]):
             self.q.task_done()
         # Keep adding new args until the function has run successfully
         while not self.event.is_set():
+            # Get all the input generators currently in the queue
+            input_gens.extend(map(_load_inputs, self._empty_queue()))
             # Schedule the q.get() and save it as an attribute so it
-            # can be cancelled as necessary
+            # can be cancelled as necessary. This needs to be scheduled
+            # *before* waiting for the known inputs.
             self._getting = self._schedule_with_timeout(self.q.get())
-            # Actually get the next argument to buffer. If this times
+            if input_gens:  # Load as many as possible concurrently
+                await aio.gather(*input_gens)
+                input_gens.clear()  # Clear processed input generators
+            # Now wait for the next arguments to buffer. If this times
             # out or is cancelled, its time to run the function.
             try:
-                inputs.add(await self._getting)
+                await _load_inputs(await self._getting)
             except (aio.TimeoutError, aio.CancelledError):
                 await self._run_func(inputs)
             else:
@@ -553,7 +567,8 @@ class BufferAsyncCalls(Generic[T]):
         being lost.
         """
         try:
-            await self.func(inputs)
+            if inputs:  # Could be empty if all empty iterators
+                await self.func(inputs)
         except BaseException as e:  # noqa
             logging.exception("Failed to run %s, retrying", self.func)
         else:
@@ -565,6 +580,40 @@ class BufferAsyncCalls(Generic[T]):
         configured :attr:`timeout`.
         """
         return self.loop.create_task(aio.wait_for(coro, self.timeout))
+
+    def _put(self, iterable: AsyncIterable[T]):
+        """
+        Helper method to put an async iterable onto the queue and clear
+        the event.
+        """
+        self.event.clear()
+        self.loop.call_soon_threadsafe(self.q.put_nowait, iterable)
+
+    def _empty_queue(self) -> Yields[AsyncIterable[T]]:
+        """Get all of the elements immediately available in the queue."""
+        while True:
+            try:
+                yield self.q.get_nowait()
+            except aio.QueueEmpty:
+                break
+            else:
+                self.q.task_done()
+
+
+async def _obj_to_aiter(o: T) -> AsyncIterable[T]:
+    """
+    Wrap a given sync object so it is a single element, async iterable
+    for compatibility with :attr:`BufferAsyncCalls.q`.
+    """
+    yield o
+
+
+async def _awaitable_to_aiter(o: Awaitable[T]) -> AsyncIterable[T]:
+    """
+    Wrap a awaitable object so it is a single element, async iterable
+    for compatibility with :attr:`BufferAsyncCalls.q`.
+    """
+    yield await o
 
 
 class DaemonTask(aio.Task):
