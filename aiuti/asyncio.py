@@ -688,8 +688,15 @@ def loop_in_thread(loop: Loop) -> Callable[[], None]:
     >>> loop.is_running()  # Running in background thread
     True
 
-    >>> loop.call_soon_threadsafe(print, "called")
+    >>> loop.call_soon_threadsafe(print, "called")  # doctest: +SKIP
     <Handle print('called')>
+
+    .. testsetup::
+
+        Run after delay to improve test case timing consistency
+
+        >>> loop.call_soon_threadsafe(lambda: sleep(0.01) or print('called'))
+        <Handle ...lambda...>
 
     >>> sleep(0.05)  # Give the loop a chance to process
     called
