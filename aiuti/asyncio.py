@@ -15,6 +15,9 @@ __all__ = [
     'threadsafe_async_cache',
     'buffer_until_timeout',
     'BufferAsyncCalls',
+    'ensure_aw',
+    'loop_in_thread',
+    'run_aw_threadsafe',
     'DaemonTask',
 ]
 
@@ -22,7 +25,7 @@ import sys
 import queue
 import logging
 import asyncio as aio
-from threading import Lock
+from threading import Lock, Thread
 from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +35,8 @@ from typing import (
 )
 
 from .typing import T, Yields, AYields
+
+Loop = aio.AbstractEventLoop
 
 logger = logging.getLogger(__name__)
 
@@ -183,9 +188,7 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
         await future  # Bubble any errors
 
 
-def to_sync_iter(iterable: AsyncIterable[T],
-                 *,
-                 loop: aio.AbstractEventLoop = None) -> Yields[T]:
+def to_sync_iter(iterable: AsyncIterable[T], *, loop: Loop = None) -> Yields[T]:
     """
     Convert the given iterable from asynchronous to synchrounous by
     by using a background thread running a new event loop to iterate it.
@@ -507,6 +510,13 @@ class BufferAsyncCalls(Generic[T]):
         # Wait for the function to finish processing
         await self.event.wait()
 
+    async def wait_from_anywhere(self, *, cancel: bool = True):
+        """
+        Wrapper around :meth:`wait` which uses :func:`ensure_aw` to
+        handle waiting from a possibly different event loop.
+        """
+        return await ensure_aw(self.wait(cancel=cancel), self.loop)
+
     async def _waiter(self):
         """
         Simple loop which tries to process the queue infinitely using
@@ -598,6 +608,127 @@ class BufferAsyncCalls(Generic[T]):
                 break
             else:
                 self.q.task_done()
+
+
+_CROSS_LOOP_POOL = ThreadPoolExecutor(32)
+
+
+async def ensure_aw(aw: Awaitable[T], loop: Loop) -> T:
+    """
+    Return an awaitable for the running loop which will ensure the
+    given awaitable is evaluated in the given loop. This is useful for
+    waiting on events or tasks defined in another thread's event loop.
+
+    .. note::
+        The situation in which this function is necessary should be
+        avoided when possible, but sometimes it is not always possible.
+
+    >>> e = aio.Event()
+    >>> e.set()
+
+    >>> e_loop = aio.get_event_loop()
+    >>> new_loop = aio.new_event_loop()
+    >>> e_loop is not new_loop
+    True
+
+    >>> def task(): return e_loop.create_task(e.wait())
+
+    >>> run = new_loop.run_until_complete
+    >>> run(task())
+    Traceback (most recent call last):
+    ...
+    ValueError: The future belongs to a different loop ...
+
+    If the target loop isn't running, it will be run directly using
+    another thread:
+
+    >>> run(ensure_aw(task(), e_loop))
+    True
+
+    If the target loop is running, it will be used as is using
+    :func:`run_aw_threadsafe` internally:
+
+    >>> stop = loop_in_thread(e_loop)
+
+    >>> run(ensure_aw(task(), e_loop))
+    True
+
+    >>> stop()  # Cleanup the loop
+    """
+
+    main_loop = aio.get_running_loop()
+
+    if main_loop is loop:
+        return await aw
+
+    if loop.is_running():
+        return await run_aw_threadsafe(aw, loop)
+
+    if loop.is_closed():
+        raise RuntimeError("Target loop is closed!")
+
+    def _loop_thread() -> T:
+        aio.set_event_loop(loop)
+        return loop.run_until_complete(aw)
+
+    return await main_loop.run_in_executor(_CROSS_LOOP_POOL, _loop_thread)
+
+
+def loop_in_thread(loop: Loop) -> Callable[[], None]:
+    """
+    Start the given loop in a thread, let it run indefinitely, and
+    return a function which can be called to signal the loop to stop.
+
+    >>> from time import sleep
+
+    >>> loop = aio.get_event_loop()
+
+    >>> stop = loop_in_thread(loop)
+    >>> loop.is_running()  # Running in background thread
+    True
+
+    >>> loop.call_soon_threadsafe(print, "called")
+    <Handle print('called')>
+
+    >>> sleep(0.05)  # Give the loop a chance to process
+    called
+
+    >>> stop()  # Signal loop to stop
+
+    >>> sleep(0.05)  # Give it a little bit of time to actually stop
+
+    >>> loop.is_running()  # No longer running
+    False
+    """
+    stop = aio.Event()
+
+    async def _spin():
+        aio.set_event_loop(loop)
+        await stop.wait()
+
+    Thread(target=loop.run_until_complete, args=(_spin(),), daemon=True).start()
+
+    def _stopper(): loop.call_soon_threadsafe(stop.set)
+
+    return _stopper
+
+
+async def run_aw_threadsafe(aw: Awaitable[T], loop: Loop) -> T:
+    """
+    Thin wrapper around :func:`asyncio.run_coroutine_threadsafe` to
+    handle any awaitable.
+
+    .. warning::
+        This does not extra handling of any event loop conflicts. Use
+        :func:`ensure_aw` for that.
+    """
+    fut = aio.run_coroutine_threadsafe(_aw_to_coro(aw), loop)
+    return await aio.wrap_future(fut)
+
+
+async def _aw_to_coro(aw: Awaitable[T]) -> T:
+    """Wrap a given awaitable so it appears as a coroutine."""
+    return await aw
 
 
 async def _obj_to_aiter(o: T) -> AsyncIterable[T]:
