@@ -634,10 +634,10 @@ async def ensure_aw(aw: Awaitable[T], loop: Loop) -> T:
     >>> def task(): return e_loop.create_task(e.wait())
 
     >>> run = new_loop.run_until_complete
-    >>> run(task())
+    >>> run(task())  # ValueError: Belongs to a different loop
     Traceback (most recent call last):
     ...
-    ValueError: The future belongs to a different loop ...
+    ValueError: ...
 
     If the target loop isn't running, it will be run directly using
     another thread:
@@ -656,7 +656,7 @@ async def ensure_aw(aw: Awaitable[T], loop: Loop) -> T:
     >>> stop()  # Cleanup the loop
     """
 
-    main_loop = aio.get_running_loop()
+    main_loop = aio.get_event_loop()
 
     if main_loop is loop:
         return await aw
@@ -684,6 +684,7 @@ def loop_in_thread(loop: Loop) -> Callable[[], None]:
     >>> loop = aio.get_event_loop()
 
     >>> stop = loop_in_thread(loop)
+    >>> sleep(0.05)  # Give the loop a chance to start
     >>> loop.is_running()  # Running in background thread
     True
 
