@@ -237,7 +237,7 @@ def to_sync_iter(iterable: AsyncIterable[T],
         loop = aio.new_event_loop()
 
     q = queue.Queue()
-    put = partial(loop.call_soon_threadsafe, q.put_nowait)
+    put = q.put_nowait
     with ThreadPoolExecutor(1) as pool:
         future = pool.submit(_set_loop_and_queue_elements)
         try:
