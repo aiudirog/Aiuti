@@ -499,7 +499,10 @@ class BufferAsyncCalls(Generic[T]):
             to be met before the function is called if it hasn't been
             already.
         """
-        await self.q.join()  # Process all queued tasks
+        # Process all queued tasks
+        # Create a task because some unknown bug on 3.7 blocks
+        # infinitely sometimes if we await join directly
+        await self.loop.create_task(self.q.join())
         if cancel and self._getting and not self._getting.done():
             # Cancel the current q.get to avoid waiting for timeout
             # The sleep(0) forces task switching to ensure that
