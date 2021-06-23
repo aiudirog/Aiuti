@@ -21,44 +21,36 @@ __all__ = [
     'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co',
 ]
 
-import sys
 import logging
 from typing import (
     TypeVar, Dict, Union, Iterable, Awaitable,
     Generator, AsyncGenerator,
 )
 
-try:
-    import typing_extensions as typing_exts
-except ImportError:
-    typing_exts = None
-
 logger = logging.getLogger(__name__)
 
 
-def _make_shim_type(name: str) -> type:
-    logger.info("Creating shim for Literal type."
-                " Please install typing_extensions to avoid this.")
-    return type(name, (type,), {'__getitem__': lambda cls, item: cls})
-
-
-if sys.version_info >= (3, 8):
+try:
     from typing import Literal, Protocol, TypedDict
-elif typing_exts is not None:
-    from typing_extensions import Literal, Protocol, TypedDict
-else:
-    # Shim implement common back ports to avoid requiring
-    # typing_extensions to be installed for regular execution.
+except ImportError:
+    try:
+        from typing_extensions import (  # type: ignore
+            Literal, Protocol, TypedDict,
+        )
+    except ImportError:
+        # Shim implement common back ports to avoid requiring
+        # typing_extensions to be installed for regular execution.
 
-    # Note that this is not a replacement for typing_extensions which
-    # should be made a normal dependency of any packages that use newer
-    # typing features and wish to support older Python versions.
-    logger.info("Creating shims for common typing features."
-                " Please install typing_extensions to avoid this.")
-    Literal = type('Literal', (type,), {'__getitem__': lambda cls, item: cls})
-    Protocol = type('Protocol', (type,), {'__getitem__': lambda cls, item: cls})
-    TypedDict = type('TypedDict', (Dict,), {})
-
+        # Note that this is not a replacement for typing_extensions which
+        # should be made a normal dependency of any packages that use newer
+        # typing features and wish to support older Python versions.
+        logger.info("Creating shims for common typing features."
+                    " Please install typing_extensions to avoid this.")
+        Literal = type('Literal', (type,),  # type: ignore
+                       {'__getitem__': lambda c, i: c})
+        Protocol = type('Protocol', (type,),   # type: ignore
+                        {'__getitem__': lambda c, i: c})
+        TypedDict = type('TypedDict', (Dict,), {})
 
 # Define common TypeVar instances for convenience
 

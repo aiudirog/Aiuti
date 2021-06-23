@@ -5,6 +5,7 @@ from typing import Set
 
 import pytest
 
+from aiuti.typing import AYields, Yields
 from aiuti.asyncio import buffer_until_timeout, BufferAsyncCalls
 
 
@@ -16,7 +17,7 @@ def buffered() -> Set[int]:
 @pytest.fixture
 async def func(buffered: Set[int]) -> BufferAsyncCalls[int]:
     @buffer_until_timeout
-    async def func(ints: Set[int]):
+    async def func(ints: Set[int]) -> None:
         nonlocal buffered
         buffered |= ints
 
@@ -28,13 +29,16 @@ async def func(buffered: Set[int]) -> BufferAsyncCalls[int]:
 # make sure it doesn't block indefinitely waiting for an item.
 
 @pytest.mark.asyncio
-async def test_error_await(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_error_await(func: BufferAsyncCalls[int],
+                           buffered: Set[int]) -> None:
     """
     Verify that passing an awaitable which errors to .await_() doesn't
     cause a deadlock.
     """
 
-    async def error(): raise ValueError
+    async def error() -> int:
+        raise ValueError
+        return 1  # noqa
 
     func.await_(error())
     await aio.wait_for(func.wait(), 10)
@@ -43,10 +47,10 @@ async def test_error_await(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 @pytest.mark.asyncio
 async def test_error_await_many(func: BufferAsyncCalls[int],
-                                buffered: Set[int]):
+                                buffered: Set[int]) -> None:
     """Same as test_error_await but with many awaitables."""
 
-    async def error(i: int):
+    async def error(i: int) -> int:
         await aio.sleep(0.01)
         if i % 10 == 0:  # Seemingly random errors
             raise ValueError
@@ -59,7 +63,8 @@ async def test_error_await_many(func: BufferAsyncCalls[int],
 
 
 @pytest.mark.asyncio
-async def test_empty_iter(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_empty_iter(func: BufferAsyncCalls[int],
+                          buffered: Set[int]) -> None:
     """
     Verify that passing an empty iterator to .map() doesn't cause
     a deadlock.
@@ -70,15 +75,16 @@ async def test_empty_iter(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 
 @pytest.mark.asyncio
-async def test_error_iter(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_error_iter(func: BufferAsyncCalls[int],
+                          buffered: Set[int]) -> None:
     """
     Verify that passing an iterator which errors to .map() doesn't cause
     a deadlock.
     """
 
-    def error_gen():
+    def error_gen() -> Yields[int]:
         raise ValueError
-        yield  # noqa
+        yield 1  # noqa
 
     func.map(error_gen())
     await aio.wait_for(func.wait(), 10)
@@ -86,10 +92,11 @@ async def test_error_iter(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 
 @pytest.mark.asyncio
-async def test_error_iter_ele(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_error_iter_ele(func: BufferAsyncCalls[int],
+                              buffered: Set[int]) -> None:
     """Same as test_error_iter but with one element yielded."""
 
-    def error_gen():
+    def error_gen() -> Yields[int]:
         yield 1
         raise ValueError
 
@@ -100,13 +107,13 @@ async def test_error_iter_ele(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 @pytest.mark.asyncio
 async def test_error_iter_many(func: BufferAsyncCalls[int],
-                               buffered: Set[int]):
+                               buffered: Set[int]) -> None:
     """
     Same as test_error_iter_ele but with many elements yielded across
     multiple iterators.
     """
 
-    def error_gen(i: int):
+    def error_gen(i: int) -> Yields[int]:
         for x in range(i, i + 10):
             yield x
         if i % 50 == 0:  # Seemingly random error
@@ -119,15 +126,16 @@ async def test_error_iter_many(func: BufferAsyncCalls[int],
 
 
 @pytest.mark.asyncio
-async def test_empty_aiter(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_empty_aiter(func: BufferAsyncCalls[int],
+                           buffered: Set[int]) -> None:
     """
     Verify that passing an empty async iterator to .amap() doesn't cause
     a deadlock.
     """
 
-    async def empty_gen():
+    async def empty_gen() -> AYields[int]:
         return
-        yield  # noqa
+        yield 1  # noqa
 
     func.amap(empty_gen())
     await aio.wait_for(func.wait(), 10)
@@ -135,15 +143,16 @@ async def test_empty_aiter(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 
 @pytest.mark.asyncio
-async def test_error_aiter(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_error_aiter(func: BufferAsyncCalls[int],
+                           buffered: Set[int]) -> None:
     """
     Verify that passing an async iterator which errors to .amap()
     doesn't cause a deadlock.
     """
 
-    async def error_gen():
+    async def error_gen() -> AYields[int]:
         raise ValueError
-        yield  # noqa
+        yield 1  # noqa
 
     func.amap(error_gen())
     await aio.wait_for(func.wait(), 10)
@@ -151,10 +160,11 @@ async def test_error_aiter(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 
 @pytest.mark.asyncio
-async def test_error_aiter_ele(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_error_aiter_ele(func: BufferAsyncCalls[int],
+                               buffered: Set[int]) -> None:
     """Same as test_error_aiter but with one element yielded."""
 
-    async def error_gen():
+    async def error_gen() -> AYields[int]:
         await aio.sleep(0.1)
         yield 1
         raise ValueError
@@ -166,13 +176,13 @@ async def test_error_aiter_ele(func: BufferAsyncCalls[int], buffered: Set[int]):
 
 @pytest.mark.asyncio
 async def test_error_aiter_many(func: BufferAsyncCalls[int],
-                                buffered: Set[int]):
+                                buffered: Set[int]) -> None:
     """
     Same as test_error_aiter_ele but with many elements yielded across
     multiple iterators.
     """
 
-    async def error_gen(i: int):
+    async def error_gen(i: int) -> AYields[int]:
         for x in range(i, i + 10):
             await aio.sleep(0.01)
             yield x
@@ -186,22 +196,23 @@ async def test_error_aiter_many(func: BufferAsyncCalls[int],
 
 
 @pytest.mark.asyncio
-async def test_stressed(func: BufferAsyncCalls[int], buffered: Set[int]):
+async def test_stressed(func: BufferAsyncCalls[int],
+                        buffered: Set[int]) -> None:
     """Combination of many existing tests in this module."""
 
-    async def error(i: int):
+    async def error(i: int) -> int:
         await aio.sleep(0)
         if i % 3 == 0:
             raise ValueError
         return i
 
-    def error_gen(i: int):
+    def error_gen(i: int) -> Yields[int]:
         for x in range(i, i + 10):
             yield x
         if i % 3 == 0:
             raise ValueError
 
-    async def error_agen(i: int):
+    async def error_agen(i: int) -> AYields[int]:
         for x in range(i, i + 10):
             await aio.sleep(0)
             yield x

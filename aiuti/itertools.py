@@ -21,7 +21,7 @@ from typing import Tuple, Iterable, Iterator, Callable, Union, Any
 from .typing import T
 
 
-def exhaust(iterable: Iterable[Any]):
+def exhaust(iterable: Iterable[Any]) -> None:
     """
     Iterate through all the values of an iterable. This is useful for
     applying a mapped function which doesn't return a useful value

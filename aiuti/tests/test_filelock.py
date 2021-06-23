@@ -12,10 +12,11 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from aiuti.filelock import FileLock
+from aiuti.typing import Yields
 
 
 @pytest.fixture
-def lock_file(tmp_path: Path) -> str:
+def lock_file(tmp_path: Path) -> Yields[str]:
     """Temporary filepath for testing the lock."""
     lock_file = tmp_path / 'file.lock'
     if lock_file.exists():
@@ -44,13 +45,13 @@ def frlock(lock_file: str) -> FileLock:
 
 
 @pytest.fixture
-def pool() -> ThreadPoolExecutor:
+def pool() -> Yields[ThreadPoolExecutor]:
     """Thread pool with 100 maximum concurrent tasks."""
     with ThreadPoolExecutor(100) as pool:
         yield pool
 
 
-def test_simple(flock: FileLock):
+def test_simple(flock: FileLock) -> None:
     """
     Asserts that the lock is locked in a context statement and that the
     return value of __enter__() is the lock.
@@ -61,7 +62,7 @@ def test_simple(flock: FileLock):
     assert not flock.is_locked
 
 
-def test_acquire_ctx(flock: FileLock):
+def test_acquire_ctx(flock: FileLock) -> None:
     """Same as test_simple but using acquire_ctx."""
     with flock.acquire_ctx() as lock:
         assert flock.is_locked
@@ -69,7 +70,7 @@ def test_acquire_ctx(flock: FileLock):
     assert not flock.is_locked
 
 
-def test_nested(frlock: FileLock):
+def test_nested(frlock: FileLock) -> None:
     """
     Asserts that the reentrant lock is not released before the most
     outer with statement that locked the lock, is left.
@@ -91,7 +92,7 @@ def test_nested(frlock: FileLock):
     assert not frlock.is_locked
 
 
-def test_nested_explicit_acquire(frlock: FileLock):
+def test_nested_explicit_acquire(frlock: FileLock) -> None:
     """
     The same as test_nested, but uses the acquire() and release()
     directly rather than context managers.
@@ -115,7 +116,7 @@ def test_nested_explicit_acquire(frlock: FileLock):
     assert not frlock.is_locked
 
 
-def test_nested_forced_release(frlock: FileLock):
+def test_nested_forced_release(frlock: FileLock) -> None:
     """
     Acquires the lock using a context manager and then again inside and
     releases it before leaving.
@@ -132,12 +133,12 @@ def test_nested_forced_release(frlock: FileLock):
     assert not frlock.is_locked
 
 
-def test_threaded(flock: FileLock, pool: ThreadPoolExecutor):
+def test_threaded(flock: FileLock, pool: ThreadPoolExecutor) -> None:
     """
     Runs 250 threads, which need the filelock. The lock must be acquired
     by all threads and released once all are done.
     """
-    def get_lock_repeatedly(count: int):
+    def get_lock_repeatedly(count: int) -> None:
         for _ in range(count):
             with flock:
                 assert flock.is_locked
@@ -148,26 +149,26 @@ def test_threaded(flock: FileLock, pool: ThreadPoolExecutor):
 
 def test_threaded_duplicate_lock(flock: FileLock,
                                  flock2: FileLock,
-                                 pool: ThreadPoolExecutor):
+                                 pool: ThreadPoolExecutor) -> None:
     """
     Runs multiple threads, which acquire the same lock file with
     different FileLock objects. When lock1 is held, lock2 must not be
     held and vice versa.
     """
 
-    def acquire_lock1():
+    def acquire_lock1() -> None:
         for _ in range(100):
             with flock:
                 assert flock.is_locked
                 assert not flock2.is_locked
 
-    def acquire_lock2():
+    def acquire_lock2() -> None:
         for _ in range(100):
             with flock2:
                 assert not flock.is_locked
                 assert flock2.is_locked
 
-    def acquire_lock(which: int):
+    def acquire_lock(which: int) -> None:
         acquire_lock1() if which == 1 else acquire_lock2()
 
     pool.map(acquire_lock, chain.from_iterable(repeat((1, 2), 250)))
@@ -176,7 +177,7 @@ def test_threaded_duplicate_lock(flock: FileLock,
     assert not flock2.is_locked
 
 
-def test_nonblocking(flock: FileLock):
+def test_nonblocking(flock: FileLock) -> None:
     """
     Verify lock is not acquired with blocking=False and acquire returns
     False.
@@ -191,7 +192,7 @@ def test_nonblocking(flock: FileLock):
     assert not flock.is_locked
 
 
-def test_nonblocking_multiple_locks(flock: FileLock, flock2: FileLock):
+def test_nonblocking_multiple_locks(flock: FileLock, flock2: FileLock) -> None:
     """Same as test_nonblocking but with multiple file locks."""
     flock.acquire()
     assert flock.is_locked
@@ -204,7 +205,7 @@ def test_nonblocking_multiple_locks(flock: FileLock, flock2: FileLock):
     assert not flock.is_locked
 
 
-def test_timeout(flock: FileLock):
+def test_timeout(flock: FileLock) -> None:
     """Verify lock is not acquired on timeout and acquire returns False."""
     flock.acquire()
     assert flock.is_locked
@@ -216,7 +217,7 @@ def test_timeout(flock: FileLock):
     assert not flock.is_locked
 
 
-def test_timeout_different_locks(flock: FileLock, flock2: FileLock):
+def test_timeout_different_locks(flock: FileLock, flock2: FileLock) -> None:
     """
     Same as test_timeout but with two different locks pointing to the
     same file.
@@ -234,7 +235,7 @@ def test_timeout_different_locks(flock: FileLock, flock2: FileLock):
     assert not flock2.is_locked
 
 
-def test_default_timeout(lock_file: str, flock: FileLock):
+def test_default_timeout(lock_file: str, flock: FileLock) -> None:
     """Test if the default timeout parameter works."""
     flock_to = FileLock(lock_file, timeout=0.1)
 
@@ -258,7 +259,7 @@ def test_default_timeout(lock_file: str, flock: FileLock):
     assert not flock_to.is_locked
 
 
-def test_timeout_acquire_ctx(flock: FileLock):
+def test_timeout_acquire_ctx(flock: FileLock) -> None:
     """Test TimeoutError is raised when acquire_ctx can't acquire the lock."""
     flock.acquire()
     with pytest.raises(TimeoutError):
@@ -267,7 +268,7 @@ def test_timeout_acquire_ctx(flock: FileLock):
     flock.release()
 
 
-def test_context_exception(flock: FileLock):
+def test_context_exception(flock: FileLock) -> None:
     """
     Verify filelock is released if an exception is raised when used in a
     context.
@@ -279,7 +280,7 @@ def test_context_exception(flock: FileLock):
         assert not flock.is_locked
 
 
-def test_context_exception_acquire_ctx(flock: FileLock):
+def test_context_exception_acquire_ctx(flock: FileLock) -> None:
     """The same as test_context_exception, but uses the acquire_ctx."""
     try:
         with flock.acquire_ctx():
@@ -288,7 +289,7 @@ def test_context_exception_acquire_ctx(flock: FileLock):
         assert not flock.is_locked
 
 
-def test_del(lock_file: str, flock: FileLock):
+def test_del(lock_file: str, flock: FileLock) -> None:
     """Verify lock is released during garbage collection."""
     tmp_flock = FileLock(lock_file)
 

@@ -9,14 +9,15 @@ This module contains various useful tools for parsing input data.
 __all__ = ['parse_to_dict']
 
 import ast
-from typing import Iterable, Union, Callable, Any, Tuple, Mapping
+from typing import Iterable, Union, Callable, Any, Tuple, Mapping, Dict
 
 
-def parse_to_dict(items: Union[Mapping, Iterable[Union[tuple, str]]],
+def parse_to_dict(items: Union[Mapping[Any, Any],
+                               Iterable[Union[Tuple[Any, ...], str]]],
                   *,
                   sep: str = '=',
                   parse: Callable[[str], Any] = ast.literal_eval,
-                  parse_keys: bool = True) -> dict:
+                  parse_keys: bool = True) -> Dict[Any, Any]:
     """
     Normalize the given input into a dictionary and parse keys & values
     as necessary into literal objects.
@@ -66,8 +67,12 @@ def parse_to_dict(items: Union[Mapping, Iterable[Union[tuple, str]]],
                 pass
         return x
 
-    parse_tuple = ((lambda *args: tuple(map(try_parse, args))) if parse_keys
-                   else lambda k, v: (k, try_parse(v)))
+    if parse_keys:
+        def parse_tuple(key: str, value: str) -> Tuple[Any, Any]:
+            return try_parse(key), try_parse(value)
+    else:
+        def parse_tuple(key: str, value: str) -> Tuple[Any, Any]:
+            return key, try_parse(value)
 
     def parse_pair(pair: Union[str, Tuple[Any, Any]]) -> Tuple[Any, Any]:
         if isinstance(pair, str):
@@ -79,7 +84,7 @@ def parse_to_dict(items: Union[Mapping, Iterable[Union[tuple, str]]],
         return parse_tuple(*pair)
 
     try:
-        items = items.items()
+        items = items.items()  # type: ignore
     except AttributeError:
         pass
 

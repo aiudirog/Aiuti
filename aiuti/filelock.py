@@ -40,17 +40,20 @@ import time
 import logging
 import threading
 import contextlib
-from typing import Union, Optional, TypeVar, ClassVar, Type
+from typing import Union, Optional, TypeVar, ClassVar, Any
 
-try:
-    import msvcrt
-except ImportError:
-    msvcrt = None
+from .typing import Yields
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
+
+def _import_optional(name: str) -> Any:
+    try:
+        return __import__(name)
+    except ImportError:
+        pass
+
+
+msvcrt = _import_optional('msvcrt')
+fcntl = _import_optional('fcntl')
 
 _logger = logging.getLogger(__name__)
 
@@ -60,6 +63,8 @@ FileLockT = TypeVar('FileLockT', bound='BaseFileLock')
 
 class BaseFileLock(abc.ABC):
     """Abstract base class for a file lock."""
+
+    _thread_lock: Union[threading.Lock, threading.RLock]
 
     def __init__(self,
                  lock_file: PathLike,
@@ -111,7 +116,7 @@ class BaseFileLock(abc.ABC):
 
     def acquire(self,
                 blocking: bool = True,
-                timeout: float = None,
+                timeout: Optional[float] = None,
                 poll_interval: float = 0.05) -> bool:
         """
         Acquire the file lock.
@@ -147,7 +152,7 @@ class BaseFileLock(abc.ABC):
 
         start_time = time.time()
 
-        def _cleanup_thread_lock():
+        def _cleanup_thread_lock() -> None:
             self._decrement_lock_counter()
             self._thread_lock.release()
 
@@ -183,8 +188,8 @@ class BaseFileLock(abc.ABC):
     @contextlib.contextmanager
     def acquire_ctx(self,
                     blocking: bool = True,
-                    timeout: float = None,
-                    poll_interval: float = 0.05):
+                    timeout: Optional[float] = None,
+                    poll_interval: float = 0.05) -> Yields[None]:
         """
         Context manager to make it more convenient to pass custom args
         to :meth:`acquire`.
@@ -198,7 +203,7 @@ class BaseFileLock(abc.ABC):
         except BaseException:  # noqa
             self.release()
 
-    def release(self, force: bool = False):
+    def release(self, force: bool = False) -> None:
         """
         Release the file lock.
 
@@ -232,13 +237,15 @@ class BaseFileLock(abc.ABC):
                 self._lock_counter = 0
                 _logger.info('Lock %s released on %s', lid, fn)
 
-        if self._reentrant or self._thread_lock.locked():
+        try:
             self._thread_lock.release()
+        except RuntimeError:  # not reentrant and already unlocked
+            pass
 
     # Open mode for the file descriptor
     _FD_OPEN_MODE: ClassVar[int] = os.O_RDWR | os.O_CREAT | os.O_TRUNC
 
-    def _acquire(self, block: bool = True):
+    def _acquire(self, block: bool = True) -> None:
         """
         Attempt to acquire the platform dependent lock and set
         :attr:`_lock_file_fd` to the file descriptor of the lock file.
@@ -257,20 +264,20 @@ class BaseFileLock(abc.ABC):
         else:
             self._lock_file_fd = fd
 
-    def _release(self):
+    def _release(self) -> None:
         """
         Release the platform dependent lock and clear
         :attr:`_lock_file_fd`
         """
-        fd = self._lock_file_fd
-        self._lock_file_fd = None
+        fd, self._lock_file_fd = self._lock_file_fd, None
+        assert isinstance(fd, int)
         try:
             self._unlock(fd)
         finally:
             os.close(fd)
 
     @abc.abstractmethod
-    def _lock(self, fd: int, block: bool = True):
+    def _lock(self, fd: int, block: bool = True) -> None:
         """
         Lock the platform dependent lock for the file descriptor.
 
@@ -280,7 +287,7 @@ class BaseFileLock(abc.ABC):
         """
 
     @abc.abstractmethod
-    def _unlock(self, fd: int):
+    def _unlock(self, fd: int) -> None:
         """
         Unlock the platform dependent lock for the file descriptor.
 
@@ -289,7 +296,7 @@ class BaseFileLock(abc.ABC):
             conditions.
         """
 
-    def _decrement_lock_counter(self):
+    def _decrement_lock_counter(self) -> None:
         """
         Helper method to decrement the lock counter without letting it
         drop below 0.
@@ -300,10 +307,10 @@ class BaseFileLock(abc.ABC):
         self.acquire()
         return self
 
-    def __exit__(self, *_exc):
+    def __exit__(self, *_exc: Any) -> None:
         self.release()
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.release(force=True)
 
 
@@ -313,10 +320,10 @@ class WindowsFileLock(BaseFileLock):
     :func:`msvcrt.locking` to hard lock the lock file.
     """
 
-    def _lock(self, fd: int, block: bool = True):
+    def _lock(self, fd: int, block: bool = True) -> None:
         msvcrt.locking(fd, msvcrt.LK_LOCK if block else msvcrt.LK_NBLCK, 1)
 
-    def _unlock(self, fd: int):
+    def _unlock(self, fd: int) -> None:
         msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
 
@@ -326,21 +333,30 @@ class UnixFileLock(BaseFileLock):
     :func:`fcntl.flock` to hard lock the lock file.
     """
 
-    def _lock(self, fd: int, block: bool = True):
+    def _lock(self, fd: int, block: bool = True) -> None:
         fcntl.flock(fd,  fcntl.LOCK_EX | (0 if block else fcntl.LOCK_NB))
 
-    def _unlock(self, fd: int):
+    def _unlock(self, fd: int) -> None:
         fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+class _UnsupportedFileLock(BaseFileLock):
+
+    def _lock(self, fd: int, block: bool = True) -> None:
+        raise RuntimeError("Filelock isn't supported by your platform!")
+
+    def _unlock(self, fd: int) -> None:
+        raise RuntimeError("Filelock isn't supported by your platform!")
 
 
 #: Alias for the lock, which should be used for the current platform.
 #: On Windows, this is an alias for :class:`WindowsFileLock` and on Unix
 #: for :class:`UnixFileLock`.
-FileLock: Type[BaseFileLock]
+FileLock = _UnsupportedFileLock
 
 if msvcrt:
-    FileLock = WindowsFileLock
+    FileLock = WindowsFileLock  # type: ignore
 elif fcntl:
-    FileLock = UnixFileLock
+    FileLock = UnixFileLock  # type: ignore
 else:
     logging.warning("No platform specific lock available!")
