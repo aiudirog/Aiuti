@@ -66,7 +66,7 @@ def test_acquire_ctx(flock: FileLock) -> None:
     """Same as test_simple but using acquire_ctx."""
     with flock.acquire_ctx() as lock:
         assert flock.is_locked
-        assert flock is lock
+        assert lock is None
     assert not flock.is_locked
 
 

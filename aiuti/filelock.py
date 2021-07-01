@@ -200,7 +200,7 @@ class BaseFileLock(abc.ABC):
             raise TimeoutError("Failed to acquire file lock:", self._lock_file)
         try:
             yield
-        except BaseException:  # noqa
+        finally:
             self.release()
 
     def release(self, force: bool = False) -> None:
