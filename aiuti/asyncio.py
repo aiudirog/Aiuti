@@ -39,7 +39,7 @@ from concurrent.futures import ThreadPoolExecutor
 from weakref import WeakKeyDictionary as WeakKeyDict
 from typing import (
     Any, AsyncIterable, Awaitable, Callable, Coroutine, DefaultDict, Dict,
-    FrozenSet, Generic, Iterable, Iterator, List, NewType, Optional, Set,
+    FrozenSet, Generic, Iterable, Iterator, List, Optional, Set,
     Tuple, Type, TypeVar, Union,
     overload, cast,
 )
@@ -51,8 +51,6 @@ X = TypeVar('X')
 
 A_contra = TypeVar('A_contra', contravariant=True)
 R_co = TypeVar('R_co', covariant=True)
-
-Key = NewType('Key', str)
 
 Loop = aio.AbstractEventLoop
 
@@ -657,11 +655,11 @@ class BufferAsyncCalls(Generic[T]):
 
 
 _BatchFunc = Callable[
-    [Iterable[Tuple[Key, A_contra]]],
-    AsyncIterable[Tuple[Key, Union[R_co, Exception]]],
+    [Iterable[Tuple[str, A_contra]]],
+    AsyncIterable[Tuple[str, Union[R_co, Exception]]],
 ]
 
-_TaskTuple = Tuple[Key, A_contra, 'aio.Future[R_co]']
+_TaskTuple = Tuple[str, A_contra, 'aio.Future[R_co]']
 
 
 class _AsyncBackgroundBatcherProto(Protocol[A_contra, R_co]):
@@ -669,7 +667,7 @@ class _AsyncBackgroundBatcherProto(Protocol[A_contra, R_co]):
     async def __call__(self,
                        arg: A_contra,
                        *,
-                       key: Optional[Union[Key, str]] = None) -> R_co: ...
+                       key: Optional[str] = None) -> R_co: ...
 
 
 @overload
@@ -715,8 +713,8 @@ def async_background_batcher(
 
     >>> @async_background_batcher(max_batch_size=2)
     ... async def add_1(
-    ...     batch: Iterable[Tuple[Key, int]],
-    ... ) -> AsyncIterable[Tuple[Key, int]]:
+    ...     batch: Iterable[Tuple[str, int]],
+    ... ) -> AsyncIterable[Tuple[str, int]]:
     ...     print("Starting batch:", batch)
     ...     for key, value in batch:
     ...         await aio.sleep(0.05)
@@ -760,7 +758,7 @@ def async_background_batcher(
 
     async def _wrapper(arg: A_contra,
                        *,
-                       key: Optional[Union[Key, str]] = None) -> R_co:
+                       key: Optional[str] = None) -> R_co:
         loop = aio.get_running_loop()
         try:
             batcher = batchers[loop]
@@ -800,8 +798,8 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
     normal result.
 
     >>> async def add_1(
-    ...     batch: Iterable[Tuple[Key, int]],
-    ... ) -> AsyncIterable[Tuple[Key, int]]:
+    ...     batch: Iterable[Tuple[str, int]],
+    ... ) -> AsyncIterable[Tuple[str, int]]:
     ...     print("Starting batch:", batch)
     ...     for key, value in batch:
     ...         await aio.sleep(0.05)
@@ -879,11 +877,11 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
     async def __call__(self,
                        arg: A_contra,
                        *,
-                       key: Optional[Union[Key, str]] = None) -> R_co:
+                       key: Optional[str] = None) -> R_co:
         if key is None:
             key = str(arg)
         fut: 'aio.Future[R_co]' = self._loop.create_future()
-        await self._queue.put((Key(key), arg, fut))
+        await self._queue.put((key, arg, fut))
         return await fut
 
     def _daemon_task(
