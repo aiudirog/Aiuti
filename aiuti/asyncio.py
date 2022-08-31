@@ -15,6 +15,8 @@ __all__ = [
     'threadsafe_async_cache',
     'buffer_until_timeout',
     'BufferAsyncCalls',
+    'async_background_batcher',
+    'AsyncBackgroundBatcher',
     'ensure_aw',
     'loop_in_thread',
     'run_aw_threadsafe',
@@ -25,19 +27,33 @@ import sys
 import queue
 import logging
 import asyncio as aio
+from asyncio import (
+    QueueEmpty as AioQueueEmpty,
+    TimeoutError as AioTimeoutError,
+)
+from itertools import islice
 from threading import Lock, Thread
 from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
+from weakref import WeakKeyDictionary as WeakKeyDict
 from typing import (
-    Iterator, Iterable, AsyncIterable, Callable, Set, Awaitable, Optional, Any,
-    Type, Generic, Dict, DefaultDict, Union, TypeVar, FrozenSet, overload,
+    Any, AsyncIterable, Awaitable, Callable, Coroutine, DefaultDict, Dict,
+    FrozenSet, Generic, Iterable, Iterator, List, NewType, Optional, Set,
+    Tuple, Type, TypeVar, Union,
+    overload, cast,
 )
 
-from .typing import T, Yields, AYields
+from .typing import T, Yields, AYields, Protocol
 
 E = TypeVar('E', bound=BaseException)
 X = TypeVar('X')
+
+A_contra = TypeVar('A_contra', contravariant=True)
+R_co = TypeVar('R_co', covariant=True)
+
+Key = NewType('Key', str)
+
 Loop = aio.AbstractEventLoop
 
 logger = logging.getLogger(__name__)
@@ -638,6 +654,323 @@ class BufferAsyncCalls(Generic[T]):
                 break
             else:
                 self.q.task_done()
+
+
+_BatchFunc = Callable[
+    [Iterable[Tuple[Key, A_contra]]],
+    AsyncIterable[Tuple[Key, Union[R_co, Exception]]],
+]
+
+_TaskTuple = Tuple[Key, A_contra, 'aio.Future[R_co]']
+
+
+class _AsyncBackgroundBatcherProto(Protocol[A_contra, R_co]):
+
+    async def __call__(self,
+                       arg: A_contra,
+                       *,
+                       key: Optional[Union[Key, str]] = None) -> R_co: ...
+
+
+@overload
+def async_background_batcher(
+    func: None = None,
+    *,
+    max_batch_size: int = ...,
+    max_concurrent_batches: int = ...,
+) -> Callable[
+    [_BatchFunc[A_contra, R_co]],
+    _AsyncBackgroundBatcherProto[A_contra, R_co],
+]: ...
+
+
+@overload
+def async_background_batcher(
+    func: _BatchFunc[A_contra, R_co],
+    *,
+    max_batch_size: int = ...,
+    max_concurrent_batches: int = ...,
+) -> _AsyncBackgroundBatcherProto[A_contra, R_co]: ...
+
+
+def async_background_batcher(
+    func: Optional[_BatchFunc[A_contra, R_co]] = None,
+    *,
+    max_batch_size: int = 256,
+    max_concurrent_batches: int = 5,
+) -> Union[
+    Callable[
+        [_BatchFunc[A_contra, R_co]],
+        _AsyncBackgroundBatcherProto[A_contra, R_co],
+    ],
+    _AsyncBackgroundBatcherProto[A_contra, R_co],
+]:
+    """
+    Decorator version of :class:`AsyncBackgroundBatcher` which also
+    handles automatically creating a new batcher for individual event
+    loops allowing declaration outside a running event loop.
+
+    Here is the example from :class:`AsyncBackgroundBatcher` rewritten
+    using the decorator syntax:
+
+    >>> @async_background_batcher(max_batch_size=2)
+    ... async def add_1(
+    ...     batch: Iterable[Tuple[Key, int]],
+    ... ) -> AsyncIterable[Tuple[Key, int]]:
+    ...     print("Starting batch:", batch)
+    ...     for key, value in batch:
+    ...         await aio.sleep(0.05)
+    ...         yield key, value + 1
+    ...     print("Finished batch:", batch)
+
+    Now we can directly call the add_1 function before the event loop
+    has started, which can be more convenient:
+
+    >>> loop = aio.new_event_loop()
+    >>> aio.set_event_loop(loop)
+    >>> loop.run_until_complete(
+    ...     aio.gather(
+    ...         add_1(1),
+    ...         add_1(2),
+    ...         add_1(3),
+    ...         add_1(4, key='fourth'),
+    ...     )
+    ... )
+    Starting batch: [('1', 1), ('2', 2)]
+    Starting batch: [('3', 3), ('fourth', 4)]
+    Finished batch: [('1', 1), ('2', 2)]
+    Finished batch: [('3', 3), ('fourth', 4)]
+    [2, 3, 4, 5]
+
+    .. note::
+       This method has a slight amount of extra overhead due to the
+       per-argument loop batcher lookups. Initializing an
+       :class:`AsyncBackgroundBatcher` directly inside a running event
+       loop can avoid this, but most applications will not notice.
+    """
+    if func is None:
+        return partial(
+            async_background_batcher,  # type: ignore
+            max_batch_size=max_batch_size,
+            max_concurrent_batches=max_concurrent_batches,
+        )
+
+    batchers: 'WeakKeyDict[Loop, AsyncBackgroundBatcher[A_contra, R_co]]' \
+        = WeakKeyDict()
+
+    async def _wrapper(arg: A_contra,
+                       *,
+                       key: Optional[Union[Key, str]] = None) -> R_co:
+        loop = aio.get_running_loop()
+        try:
+            batcher = batchers[loop]
+        except KeyError:
+            batcher = batchers[loop] = AsyncBackgroundBatcher(
+                cast(_BatchFunc[A_contra, R_co], func),
+                max_batch_size=max_batch_size,
+                max_concurrent_batches=max_concurrent_batches,
+            )
+        return await batcher(arg, key=key)
+
+    for attr in ('__module__', '__name__', '__qualname__', '__doc__'):
+        setattr(_wrapper, attr, getattr(func, attr, None))
+    return _wrapper
+
+
+class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
+    """
+    Allow single async executions of a function to be batched in the
+    background and submitted together with individual results being
+    properly returned to the original callers/waiters.
+
+    A good usecase for this is single-row database lookups/mutations
+    that can be submitted in bulk to reduce the number of round-trips
+    to the server but are often easier to write as seperate, per-row
+    tasks. Using this class for background batching allows the best of
+    both worlds.
+
+    Here is a simple example which adds one to the given input.
+
+    First, we'll define the batch function which is asynchronous and
+    takes each batch as an iterable of tuples containing each task key
+    and argument. The batch function should then yield the results as
+    tuples containing the task key and the result. Because the key is
+    returned, results can be yielded in any order. To indicate an error
+    occurred, simply yield an :class:`Exception` object instead of a
+    normal result.
+
+    >>> async def add_1(
+    ...     batch: Iterable[Tuple[Key, int]],
+    ... ) -> AsyncIterable[Tuple[Key, int]]:
+    ...     print("Starting batch:", batch)
+    ...     for key, value in batch:
+    ...         await aio.sleep(0.05)
+    ...         yield key, value + 1
+    ...     print("Finished batch:", batch)
+
+    To utilize the batched execution, first create an instance of
+    :class:`AsyncBackgroundBatcher` with the batch function and any additional
+    configuration kwargs. Then, the returned object can be called for
+    a single execution. To pass a custom key, utilize the ``key`` kwarg:
+
+    >>> async def main():
+    ...     batched = AsyncBackgroundBatcher(add_1, max_batch_size=2)
+    ...     return await aio.gather(
+    ...         batched(1),
+    ...         batched(2),
+    ...         batched(3),
+    ...         batched(4, key='fourth'),
+    ...     )
+
+    >>> aio.run(main())
+    Starting batch: [('1', 1), ('2', 2)]
+    Starting batch: [('3', 3), ('fourth', 4)]
+    Finished batch: [('1', 1), ('2', 2)]
+    Finished batch: [('3', 3), ('fourth', 4)]
+    [2, 3, 4, 5]
+
+    As can be seen above, the batches were started in order and then ran
+    concurrently with the individual results returned to the original
+    caller.
+
+    .. warning::
+       Awaits after the final yield may not execute as the processing of
+       each batch is spun off as a background task and will not prevent
+       the event loop from closing.
+    """
+
+    #: Async batch execution function which takes the task argument
+    #: tuples and yields task result tuples
+    func: _BatchFunc[A_contra, R_co]
+    #: Maximum number of elements in each batch.
+    #: Can be safely mutated after initialization.
+    max_batch_size: int
+
+    #: Queue used to buffer all tasks to be executed
+    _queue: 'aio.Queue[_TaskTuple[A_contra, R_co]]'
+    #: Event loop the batcher is currently running in
+    _loop: Loop
+    #: Semaphore used to prevent to limit the number of concurrent
+    #: executions of the batch function
+    _semaphore: aio.Semaphore
+    #: Task running the main loop that is waiting for batches and
+    #: spawning sub-tasks to process them
+    _loop_task: 'DaemonTask'
+
+    def __init__(self,
+                 func: _BatchFunc[A_contra, R_co],
+                 *,
+                 max_batch_size: int = 256,
+                 max_concurrent_batches: int = 5):
+        """
+        :param func: Batch execution function
+        :param max_batch_size:
+            Maximum size for each batch passed to `func`
+        :param max_concurrent_batches:
+            Maximum number of concurrent executions of `func`
+        """
+        self.func = func
+        self._queue = aio.Queue()
+        self.max_batch_size = max_batch_size
+        self._semaphore = aio.Semaphore(value=max_concurrent_batches)
+        self._loop = aio.get_running_loop()
+        self._loop_task = self._daemon_task(self._processing_loop())
+
+    async def __call__(self,
+                       arg: A_contra,
+                       *,
+                       key: Optional[Union[Key, str]] = None) -> R_co:
+        if key is None:
+            key = str(arg)
+        fut: 'aio.Future[R_co]' = self._loop.create_future()
+        await self._queue.put((Key(key), arg, fut))
+        return await fut
+
+    def _daemon_task(
+        self,
+        coro: Coroutine[Any, Any, Any],
+    ) -> 'DaemonTask':
+        """
+        Helper method to create a :class:`DaemonTask` instance in the
+        current event loop.
+        """
+        return DaemonTask(coro, loop=self._loop)
+
+    async def _processing_loop(self) -> None:
+        while True:
+            tasks = await self._get_next_batch()
+            # Don't wait for the current batch to finish
+            self._daemon_task(self._process_batch(tasks))  # noqa
+
+    async def _get_next_batch(self) -> List['_TaskTuple[A_contra, R_co]']:
+        """
+        Helper method to get the next batch of tasks to process off the
+        queue. Each batch is a list of tuples containing the task key,
+        argument, and future for the result.
+        """
+        q = self._queue
+        # Wait for the first task to appear in the queue
+        tasks = [await q.get()]
+        while len(tasks) < self.max_batch_size:
+            # Grab all available tasks as efficiently as possible
+            # Yes - this is a micro-optimization
+            try:
+                tasks.extend(islice(
+                    iter(q.get_nowait, object()),
+                    self.max_batch_size - len(tasks),
+                ))
+            except AioQueueEmpty:
+                pass
+            else:
+                continue
+            # Give the publisher a little breathing room to actually
+            # populate the queue before declaring it empty
+            try:
+                tasks.append(await aio.wait_for(q.get(), timeout=0.05))
+            except AioTimeoutError:  # No more tasks coming
+                break
+        return tasks
+
+    async def _process_batch(
+        self,
+        tasks: List['_TaskTuple[A_contra, R_co]'],
+    ) -> None:
+        """
+        Process a given batch of task tuples. A list of tuples of task
+        key and arg will be passed to the function which will yield
+        tuples of task keys and result values. If the result is an
+        :class:`Exception`, the future will be marked as failed with
+        that exception. Any other type of result will be treated as
+        success and set as the future's result.
+
+        If the batch function raises an error, all futures will have
+        that exception set.
+        """
+        args = [t[:2] for t in tasks]
+        futs = {k: f for k, _, f in tasks}
+
+        try:
+            async with self._semaphore:  # Limit concurrent executions
+                logger.debug(
+                    "Sending batch of size %d to %s",
+                    len(args), self.func,
+                )
+                async for key, result in self.func(args):
+                    fut = futs.pop(key)
+                    if isinstance(result, Exception):
+                        fut.set_exception(result)
+                    else:
+                        fut.set_result(result)
+        except Exception as e:
+            logger.debug("Exception while processing batch", exc_info=True)
+            for fut in futs.values():
+                fut.set_exception(e)
+            return
+
+        if futs:
+            logger.error("Missing outputs for %d futures", len(futs))
+            for key, fut in futs.items():
+                fut.set_exception(ValueError(f"Missing result for {key!r}"))
 
 
 _CROSS_LOOP_POOL = ThreadPoolExecutor(32)
