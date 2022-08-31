@@ -1,1 +1,1 @@
-.. automodule:: aiuti.iter
+.. automodule:: aiuti.itertools
