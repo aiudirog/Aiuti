@@ -28,7 +28,6 @@ async def func(buffered: Set[int]) -> BufferAsyncCalls[int]:
 # scheduled to be put on the queue. If that fails to happen, we need to
 # make sure it doesn't block indefinitely waiting for an item.
 
-@pytest.mark.asyncio
 async def test_error_await(func: BufferAsyncCalls[int],
                            buffered: Set[int]) -> None:
     """
@@ -45,7 +44,6 @@ async def test_error_await(func: BufferAsyncCalls[int],
     assert not buffered  # sanity
 
 
-@pytest.mark.asyncio
 async def test_error_await_many(func: BufferAsyncCalls[int],
                                 buffered: Set[int]) -> None:
     """Same as test_error_await but with many awaitables."""
@@ -62,7 +60,6 @@ async def test_error_await_many(func: BufferAsyncCalls[int],
     assert buffered == set(range(250)) - set(range(0, 250, 10))
 
 
-@pytest.mark.asyncio
 async def test_empty_iter(func: BufferAsyncCalls[int],
                           buffered: Set[int]) -> None:
     """
@@ -74,7 +71,6 @@ async def test_empty_iter(func: BufferAsyncCalls[int],
     assert not buffered  # sanity
 
 
-@pytest.mark.asyncio
 async def test_error_iter(func: BufferAsyncCalls[int],
                           buffered: Set[int]) -> None:
     """
@@ -91,7 +87,6 @@ async def test_error_iter(func: BufferAsyncCalls[int],
     assert not buffered  # sanity
 
 
-@pytest.mark.asyncio
 async def test_error_iter_ele(func: BufferAsyncCalls[int],
                               buffered: Set[int]) -> None:
     """Same as test_error_iter but with one element yielded."""
@@ -105,7 +100,6 @@ async def test_error_iter_ele(func: BufferAsyncCalls[int],
     assert buffered == {1}
 
 
-@pytest.mark.asyncio
 async def test_error_iter_many(func: BufferAsyncCalls[int],
                                buffered: Set[int]) -> None:
     """
@@ -125,7 +119,6 @@ async def test_error_iter_many(func: BufferAsyncCalls[int],
     assert buffered == set(range(250))
 
 
-@pytest.mark.asyncio
 async def test_empty_aiter(func: BufferAsyncCalls[int],
                            buffered: Set[int]) -> None:
     """
@@ -142,7 +135,6 @@ async def test_empty_aiter(func: BufferAsyncCalls[int],
     assert not buffered  # sanity
 
 
-@pytest.mark.asyncio
 async def test_error_aiter(func: BufferAsyncCalls[int],
                            buffered: Set[int]) -> None:
     """
@@ -159,7 +151,6 @@ async def test_error_aiter(func: BufferAsyncCalls[int],
     assert not buffered  # sanity
 
 
-@pytest.mark.asyncio
 async def test_error_aiter_ele(func: BufferAsyncCalls[int],
                                buffered: Set[int]) -> None:
     """Same as test_error_aiter but with one element yielded."""
@@ -174,7 +165,6 @@ async def test_error_aiter_ele(func: BufferAsyncCalls[int],
     assert buffered == {1}
 
 
-@pytest.mark.asyncio
 async def test_error_aiter_many(func: BufferAsyncCalls[int],
                                 buffered: Set[int]) -> None:
     """
@@ -195,7 +185,6 @@ async def test_error_aiter_many(func: BufferAsyncCalls[int],
     assert buffered == set(range(250))
 
 
-@pytest.mark.asyncio
 async def test_stressed(func: BufferAsyncCalls[int],
                         buffered: Set[int]) -> None:
     """Combination of many existing tests in this module."""
