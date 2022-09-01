@@ -1056,10 +1056,10 @@ def loop_in_thread(loop: Loop) -> Callable[[], None]:
 
         Run after delay to improve test case timing consistency
 
-        >>> loop.call_soon_threadsafe(lambda: sleep(0.01) or print('called'))
+        >>> loop.call_soon_threadsafe(lambda: sleep(0.1) or print('called'))
         <Handle ...lambda...>
 
-    >>> sleep(0.05)  # Give the loop a chance to process
+    >>> sleep(0.3)  # Give the loop a chance to process
     called
 
     >>> stop()  # Signal loop to stop
