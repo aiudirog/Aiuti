@@ -771,7 +771,10 @@ def async_background_batcher(
         return await batcher(arg, key=key)
 
     for attr in ('__module__', '__name__', '__qualname__', '__doc__'):
-        setattr(_wrapper, attr, getattr(func, attr, None))
+        try:
+            setattr(_wrapper, attr, getattr(func, attr))
+        except AttributeError:
+            pass
     return _wrapper
 
 
