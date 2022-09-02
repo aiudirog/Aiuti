@@ -9,7 +9,7 @@ Aiuti
    :target: https://en.wikipedia.org/wiki/MIT_License
    :alt: Licence - MIT
 
-.. image:: https://github.com/aiudirog/aiuti/workflows/tests/badge.svg
+.. image:: https://github.com/aiudirog/aiuti/workflows/CI/badge.svg
    :target: https://github.com/aiudirog/aiuti
    :alt: Tests Status
 
