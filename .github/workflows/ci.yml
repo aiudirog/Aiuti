@@ -100,7 +100,7 @@ jobs:
           draft: true  # Give me a moment to edit in the description
           prerelease: false
       - name: Publish
-        uses: pypa/gh-action-pypi-publish@v1
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
           user: __token__
           password: ${{ secrets.PYPI_TOKEN }}
