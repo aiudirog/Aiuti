@@ -676,6 +676,7 @@ def async_background_batcher(
     *,
     max_batch_size: int = ...,
     max_concurrent_batches: int = ...,
+    batch_timeout: float = ...,
 ) -> Callable[
     [_BatchFunc[A_contra, R_co]],
     _AsyncBackgroundBatcherProto[A_contra, R_co],
@@ -688,6 +689,7 @@ def async_background_batcher(
     *,
     max_batch_size: int = ...,
     max_concurrent_batches: int = ...,
+    batch_timeout: float = ...,
 ) -> _AsyncBackgroundBatcherProto[A_contra, R_co]: ...
 
 
@@ -696,6 +698,7 @@ def async_background_batcher(
     *,
     max_batch_size: int = 256,
     max_concurrent_batches: int = 5,
+    batch_timeout: float = 0.05,
 ) -> Union[
     Callable[
         [_BatchFunc[A_contra, R_co]],
@@ -751,6 +754,7 @@ def async_background_batcher(
             async_background_batcher,  # type: ignore
             max_batch_size=max_batch_size,
             max_concurrent_batches=max_concurrent_batches,
+            batch_timeout=batch_timeout,
         )
 
     batchers: 'WeakKeyDict[Loop, AsyncBackgroundBatcher[A_contra, R_co]]' \
@@ -767,6 +771,7 @@ def async_background_batcher(
                 cast(_BatchFunc[A_contra, R_co], func),
                 max_batch_size=max_batch_size,
                 max_concurrent_batches=max_concurrent_batches,
+                batch_timeout=batch_timeout,
             )
         return await batcher(arg, key=key)
 
@@ -846,6 +851,9 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
     #: Maximum number of elements in each batch.
     #: Can be safely mutated after initialization.
     max_batch_size: int
+    #: Number of seconds to wait for more elements before an
+    #: incomplete batch is processed
+    batch_timeout: float
 
     #: Queue used to buffer all tasks to be executed
     _queue: 'aio.Queue[_TaskTuple[A_contra, R_co]]'
@@ -862,17 +870,22 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
                  func: _BatchFunc[A_contra, R_co],
                  *,
                  max_batch_size: int = 256,
-                 max_concurrent_batches: int = 5):
+                 max_concurrent_batches: int = 5,
+                 batch_timeout: float = 0.05):
         """
         :param func: Batch execution function
         :param max_batch_size:
             Maximum size for each batch passed to `func`
         :param max_concurrent_batches:
             Maximum number of concurrent executions of `func`
+        :param batch_timeout:
+            Number of seconds to wait for more elements before an
+            incomplete batch is processed
         """
         self.func = func
         self._queue = aio.Queue()
         self.max_batch_size = max_batch_size
+        self.batch_timeout = batch_timeout
         self._semaphore = aio.Semaphore(value=max_concurrent_batches)
         self._loop = aio.get_running_loop()
         self._loop_task = self._daemon_task(self._processing_loop())
@@ -927,7 +940,7 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
             # Give the publisher a little breathing room to actually
             # populate the queue before declaring it empty
             try:
-                tasks.append(await aio.wait_for(q.get(), timeout=0.05))
+                tasks.append(await aio.wait_for(q.get(), self.batch_timeout))
             except AioTimeoutError:  # No more tasks coming
                 break
         return tasks
