@@ -924,7 +924,13 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
         """
         q = self._queue
         # Wait for the first task to appear in the queue
-        tasks = [await q.get()]
+        try:
+            tasks = [await q.get()]
+        except RuntimeError as e:
+            if str(e).lower() == 'event loop is closed':
+                return []  # Don't spam errors when shutting down
+            raise
+
         while len(tasks) < self.max_batch_size:
             # Grab all available tasks as efficiently as possible
             # Yes - this is a micro-optimization
