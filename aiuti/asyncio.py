@@ -32,11 +32,12 @@ from asyncio import (
     TimeoutError as AioTimeoutError,
 )
 from itertools import islice
-from threading import Lock, Thread
+from threading import Lock
 from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
-from weakref import WeakKeyDictionary as WeakKeyDict
+from weakref import WeakKeyDictionary as WeakKeyDict, finalize
+from time import sleep
 from typing import (
     Any, AsyncIterable, Awaitable, Callable, Coroutine, DefaultDict, Dict,
     FrozenSet, Generic, Iterable, Iterator, List, Optional, Set,
@@ -1051,8 +1052,9 @@ async def ensure_aw(aw: Awaitable[T], loop: Loop) -> T:
         raise RuntimeError("Target loop is closed!")
 
     def _loop_thread() -> T:
-        aio.set_event_loop(loop)
-        return loop.run_until_complete(aw)
+        with _get_loop_lock(loop):
+            aio.set_event_loop(loop)
+            return loop.run_until_complete(aw)
 
     return await main_loop.run_in_executor(_CROSS_LOOP_POOL, _loop_thread)
 
@@ -1067,7 +1069,6 @@ def loop_in_thread(loop: Loop) -> Callable[[], None]:
     >>> loop = aio.get_event_loop()
 
     >>> stop = loop_in_thread(loop)
-    >>> sleep(0.05)  # Give the loop a chance to start
     >>> loop.is_running()  # Running in background thread
     True
 
@@ -1086,22 +1087,45 @@ def loop_in_thread(loop: Loop) -> Callable[[], None]:
 
     >>> stop()  # Signal loop to stop
 
-    >>> sleep(0.05)  # Give it a little bit of time to actually stop
-
     >>> loop.is_running()  # No longer running
     False
     """
-    stop = aio.Event()
+    def _loop_thread() -> None:
+        with _get_loop_lock(loop):
+            aio.set_event_loop(loop)
+            loop.run_forever()
 
-    async def _spin() -> None:
-        aio.set_event_loop(loop)
-        await stop.wait()
+    future = _CROSS_LOOP_POOL.submit(_loop_thread)
 
-    Thread(target=loop.run_until_complete, args=(_spin(),), daemon=True).start()
+    while not loop.is_running():
+        sleep(0)  # Force switching to other threads
 
-    def _stopper() -> None: loop.call_soon_threadsafe(stop.set)
+    def _stopper() -> None:
+        loop.call_soon_threadsafe(loop.stop)
+        future.result()  # Wait for loop to exit and reveal errors
 
     return _stopper
+
+
+_LOOP_LOCKS: Dict[int, Lock] = {}
+_LOOP_LOCKS_CREATE_LOCK = Lock()
+
+
+def _get_loop_lock(loop: aio.AbstractEventLoop) -> Lock:
+    key = id(loop)
+    try:  # Check to see if lock is already created
+        return _LOOP_LOCKS[key]
+    except KeyError:
+        pass
+
+    with _LOOP_LOCKS_CREATE_LOCK:  # Ensure atomic creation
+        try:  # Handle case where another thread acquired lock first
+            return _LOOP_LOCKS[key]
+        except KeyError:  # FIRST! Create the lock
+            lock = _LOOP_LOCKS[key] = Lock()
+            # Ensure the lock is cleaned up when the loop is destroyed
+            finalize(loop, _LOOP_LOCKS.pop, key, None)  # type: ignore
+            return lock
 
 
 async def run_aw_threadsafe(aw: Awaitable[T], loop: Loop) -> T:
