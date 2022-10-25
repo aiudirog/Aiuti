@@ -82,10 +82,11 @@ jobs:
       - name: Change Log
         id: change_log
         run: >-
-          echo "::set-output name=text::$(
+          TEXT=$(
           git --no-pager log --pretty=format:'- %s (%h)'
           `git describe --abbrev=0 --tags HEAD^1`..HEAD
-          )"
+          )
+          echo "text=$TEXT" >> $GITHUB_OUTPUT
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
