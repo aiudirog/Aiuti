@@ -33,14 +33,13 @@ from asyncio import (
 )
 from itertools import islice
 from threading import Lock
-from collections import defaultdict
 from functools import partial, wraps
 from concurrent.futures import ThreadPoolExecutor
 from weakref import WeakKeyDictionary as WeakKeyDict, finalize
 from time import sleep
 from typing import (
-    Any, AsyncIterable, Awaitable, Callable, Coroutine, DefaultDict, Dict,
-    FrozenSet, Generic, Iterable, Iterator, List, Optional, Set,
+    Any, AsyncIterable, Awaitable, Callable, Coroutine, Dict,
+    Generic, Iterable, Iterator, List, Optional, Set,
     Tuple, Type, TypeVar, Union,
     overload, cast,
 )
@@ -322,32 +321,50 @@ def threadsafe_async_cache(
         per-instance basis during intilaztion so that the cache only
         lives as long as the object.
     """
-    cache: Dict[FrozenSet[Any], T] = {}
+    cache: Dict[Tuple[Any, ...], T] = {}
     # 1 lock per input key
-    locks: DefaultDict[FrozenSet[Any], Lock] = defaultdict(Lock)
+    locks: Dict[Tuple[Any, ...], Lock] = {}
+    # Ensure thread safety while creating locks
+    lock_making_lock = Lock()
 
     @wraps(func)
     async def _wrapper(*args: Any, **kwargs: Any) -> T:
         # Get the key from the input arguments
-        key = frozenset(args + tuple(kwargs.values()))
+        key = args, frozenset(kwargs.items())
+
         while True:
+            # Avoid locking during this first check for performance
             try:  # to get the value from the cache
                 return cache[key]
             except KeyError:
                 pass
+
             # Need to calculate and cache the value once
-            lock = locks[key]
+            with lock_making_lock:
+                try:  # Get a unique lock for this entry
+                    lock = locks[key]
+                except KeyError:
+                    # Make sure another thread didn't finish caching and
+                    # clean up the lock since the last check
+                    try:
+                        return cache[key]
+                    except KeyError:
+                        pass
+                    lock = locks[key] = Lock()
+
             if lock.acquire(blocking=False):  # First to arrive, cache
                 try:  # to run the function and get the result
                     result = await func(*args, **kwargs)
                 except BaseException:
                     raise  # Don't cache errors, maybe timeouts or such
                 else:  # Successfully got the result
-                    cache[key] = result
-                    del locks[key]  # Allow lock to be garbage collected
+                    with lock_making_lock:
+                        cache[key] = result
+                        del locks[key]  # Allow lock garbage collection
                 finally:  # Ensure lock is always released
                     lock.release()
                 return result
+
             # Wait for the other thread/task to cache the result by
             # acquiring the lock in another thread to avoid blocking the
             # current loop. Once this is done, the loop will continue
