@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from aiuti.filelock import FileLock
+from aiuti.itertools import exhaust
 from aiuti.typing import Yields
 
 
@@ -143,7 +144,7 @@ def test_threaded(flock: FileLock, pool: ThreadPoolExecutor) -> None:
             with flock:
                 assert flock.is_locked
 
-    pool.map(get_lock_repeatedly, repeat(100, 250))
+    exhaust(pool.map(get_lock_repeatedly, repeat(100, 250)))
     assert not flock.is_locked
 
 
@@ -171,7 +172,7 @@ def test_threaded_duplicate_lock(flock: FileLock,
     def acquire_lock(which: int) -> None:
         acquire_lock1() if which == 1 else acquire_lock2()
 
-    pool.map(acquire_lock, chain.from_iterable(repeat((1, 2), 250)))
+    exhaust(pool.map(acquire_lock, chain.from_iterable(repeat((1, 2), 250))))
 
     assert not flock.is_locked
     assert not flock2.is_locked
