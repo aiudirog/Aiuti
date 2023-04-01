@@ -12,11 +12,16 @@ import errors on older versions of Python:
     - ``Literal``
     - ``Protocol``
     - ``TypedDict``
+    - ``ParamSpec``
+    - ``ParamSpecArgs``
+    - ``ParamSpecKwargs``
+    - ``Concatenate``
 
 """
 
 __all__ = [
     'Literal', 'Protocol', 'TypedDict',
+    'ParamSpec', 'ParamSpecArgs', 'ParamSpecKwargs', 'Concatenate',
     'MaybeIter', 'MaybeAwaitable', 'Yields', 'AYields',
     'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co', 'F',
 ]
@@ -47,10 +52,32 @@ except ImportError:
         logger.info("Creating shims for common typing features."
                     " Please install typing_extensions to avoid this.")
         Literal = type('Literal', (type,),  # type: ignore
-                       {'__getitem__': lambda c, i: c})
+                       {'__class_getitem__': lambda c, i: c})
         Protocol = type('Protocol', (type,),   # type: ignore
-                        {'__getitem__': lambda c, i: c})
+                        {'__class_getitem__': lambda c, i: c})
         TypedDict = type('TypedDict', (Dict,), {})
+
+try:
+    from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, Concatenate
+except ImportError:
+    try:
+        from typing_extensions import (  # type: ignore
+            ParamSpec, ParamSpecArgs, ParamSpecKwargs, Concatenate,  # noqa
+        )
+    except ImportError:
+        logger.info("Creating shims for ParamSpec typing features."
+                    " Please install typing_extensions to avoid this.")
+
+        def _any_init(*_: Any, **__: Any) -> None: return None
+        ParamSpecArgs = type('ParamSpecArgs', (),  # type: ignore
+                             {'__init__': lambda *_, **__: None})
+        ParamSpecKwargs = type('ParamSpecArgs', (),  # type: ignore
+                               {'__init__': lambda *_, **__: None})
+        ParamSpec = type('ParamSpec', (list,),  # type: ignore
+                         {'__init__': lambda *_, **__: None,
+                          'args': None, 'kwargs': None})
+        Concatenate = type('Concatenate', (type,),   # type: ignore
+                           {'__class_getitem__': lambda c, i: c})
 
 # Define common TypeVar instances for convenience
 
