@@ -18,13 +18,13 @@ import errors on older versions of Python:
 __all__ = [
     'Literal', 'Protocol', 'TypedDict',
     'MaybeIter', 'MaybeAwaitable', 'Yields', 'AYields',
-    'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co',
+    'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co', 'F',
 ]
 
 import logging
 from typing import (
-    TypeVar, Dict, Union, Iterable, Awaitable,
-    Generator, AsyncGenerator,
+    Any, AsyncGenerator, Awaitable, Callable, Dict, Generator, Iterable,
+    TypeVar, Union,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,9 @@ VT = TypeVar('VT')
 KT_co = TypeVar('KT_co', covariant=True)
 #: Generic covariant type var for values
 VT_co = TypeVar('VT_co', covariant=True)
+
+#: Generic type var for a callable function
+F = TypeVar('F', bound=Callable[..., Any])
 
 #: Generic type for an object which may be a single value of a given
 #: type or an iterable of that type
