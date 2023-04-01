@@ -12,6 +12,7 @@ import errors on older versions of Python:
     - ``Literal``
     - ``Protocol``
     - ``TypedDict``
+    - ``TypeAlias``
     - ``ParamSpec``
     - ``ParamSpecArgs``
     - ``ParamSpecKwargs``
@@ -20,7 +21,7 @@ import errors on older versions of Python:
 """
 
 __all__ = [
-    'Literal', 'Protocol', 'TypedDict',
+    'Literal', 'Protocol', 'TypedDict', 'TypeAlias',
     'ParamSpec', 'ParamSpecArgs', 'ParamSpecKwargs', 'Concatenate',
     'MaybeIter', 'MaybeAwaitable', 'Yields', 'AYields',
     'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co', 'F',
@@ -78,6 +79,14 @@ except ImportError:
                           'args': None, 'kwargs': None})
         Concatenate = type('Concatenate', (type,),   # type: ignore
                            {'__class_getitem__': lambda c, i: c})
+
+try:
+    from typing import TypeAlias
+except ImportError:
+    try:
+        from typing_extensions import TypeAlias
+    except ImportError:
+        TypeAlias = type('TypeAlias', (), {})  # type: ignore
 
 # Define common TypeVar instances for convenience
 
