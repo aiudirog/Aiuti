@@ -194,7 +194,7 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
             put(_DONE)
 
     q: 'aio.Queue[Union[T, object]]' = aio.Queue()
-    loop = aio.get_event_loop()
+    loop = aio.get_running_loop()
     put = partial(loop.call_soon_threadsafe, q.put_nowait)
     with ThreadPoolExecutor(1) as pool:
         future = loop.run_in_executor(pool, _queue_elements)
@@ -369,7 +369,7 @@ def threadsafe_async_cache(
             # acquiring the lock in another thread to avoid blocking the
             # current loop. Once this is done, the loop will continue
             # and the cached result can be retrieved.
-            await aio.get_event_loop().run_in_executor(None, lock.acquire)
+            await aio.get_running_loop().run_in_executor(None, lock.acquire)
             lock.release()
 
     return _wrapper
@@ -1057,7 +1057,7 @@ async def ensure_aw(aw: Awaitable[T], loop: Loop) -> T:
     >>> stop()  # Cleanup the loop
     """
 
-    main_loop = aio.get_event_loop()
+    main_loop = aio.get_running_loop()
 
     if main_loop is loop:
         return await aw
