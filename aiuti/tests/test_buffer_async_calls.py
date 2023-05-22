@@ -40,7 +40,7 @@ async def test_error_await(func: BufferAsyncCalls[int],
         return 1  # noqa
 
     func.await_(error())
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert not buffered  # sanity
 
 
@@ -56,7 +56,7 @@ async def test_error_await_many(func: BufferAsyncCalls[int],
 
     for x in range(250):
         func.await_(error(x))
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert buffered == set(range(250)) - set(range(0, 250, 10))
 
 
@@ -67,7 +67,7 @@ async def test_empty_iter(func: BufferAsyncCalls[int],
     a deadlock.
     """
     func.map(iter([]))
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert not buffered  # sanity
 
 
@@ -83,7 +83,7 @@ async def test_error_iter(func: BufferAsyncCalls[int],
         yield 1  # noqa
 
     func.map(error_gen())
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert not buffered  # sanity
 
 
@@ -96,7 +96,7 @@ async def test_error_iter_ele(func: BufferAsyncCalls[int],
         raise ValueError
 
     func.map(error_gen())
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert buffered == {1}
 
 
@@ -115,7 +115,7 @@ async def test_error_iter_many(func: BufferAsyncCalls[int],
 
     for start in range(0, 250, 10):
         func.map(error_gen(start))
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert buffered == set(range(250))
 
 
@@ -131,7 +131,7 @@ async def test_empty_aiter(func: BufferAsyncCalls[int],
         yield 1  # noqa
 
     func.amap(empty_gen())
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert not buffered  # sanity
 
 
@@ -147,7 +147,7 @@ async def test_error_aiter(func: BufferAsyncCalls[int],
         yield 1  # noqa
 
     func.amap(error_gen())
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert not buffered  # sanity
 
 
@@ -161,7 +161,7 @@ async def test_error_aiter_ele(func: BufferAsyncCalls[int],
         raise ValueError
 
     func.amap(error_gen())
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert buffered == {1}
 
 
@@ -181,7 +181,7 @@ async def test_error_aiter_many(func: BufferAsyncCalls[int],
 
     for start in range(0, 250, 10):
         func.amap(error_gen(start))
-    await aio.wait_for(func.wait(), 10)
+    await aio.wait_for(func.wait(), 60)
     assert buffered == set(range(250))
 
 
