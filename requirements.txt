@@ -3,3 +3,4 @@ pytest
 pytest-asyncio>=0.17
 requests
 httpx
+lru-dict
