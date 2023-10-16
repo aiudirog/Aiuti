@@ -38,8 +38,8 @@ from concurrent.futures import ThreadPoolExecutor
 from weakref import WeakKeyDictionary as WeakKeyDict, finalize
 from time import sleep
 from typing import (
-    Any, AsyncIterable, Awaitable, Callable, Coroutine, Dict, MutableMapping,
-    Generic, Iterable, Iterator, List, Optional, Set,
+    Any, AsyncIterable, Awaitable, Callable, Coroutine, Dict,
+    MutableMapping, Generic, Iterable, Iterator, List, Optional, Set,
     Tuple, Type, TypeVar, Union,
     overload, cast,
 )
@@ -391,10 +391,10 @@ def threadsafe_async_cache(
     _func: _AsyncFunc = func
     del cache, func
 
-    # 1 lock per input key
-    locks: Dict[Tuple[Any, ...], Lock] = {}
-    # Ensure thread safety while creating locks
-    lock_making_lock = Lock()
+    # 1 loop + event per input key currently caching
+    events: Dict[Tuple[Any, ...], Tuple[aio.AbstractEventLoop, aio.Event]] = {}
+    # Ensure thread safety while creating events
+    event_making_lock = Lock()
 
     @wraps(_func)
     async def _wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -409,39 +409,42 @@ def threadsafe_async_cache(
                 pass
 
             # Need to calculate and cache the value once
-            with lock_making_lock:
-                try:  # Get a unique lock for this entry
-                    lock = locks[key]
+
+            with event_making_lock:
+                try:
+                    # Try to get the loop + event of the loop currently
+                    # caching the value
+                    loop, event = events[key]
                 except KeyError:
-                    # Make sure another thread didn't finish caching and
-                    # clean up the lock since the last check
-                    try:
-                        return _cache[key]
-                    except KeyError:
-                        pass
-                    lock = locks[key] = Lock()
+                    # No existing event -> this task is going to cache
+                    # the value and provide an event for others to wait
+                    loop = aio.get_running_loop()
+                    event = aio.Event()
+                    events[key] = loop, event
+                    waiting = False
+                else:
+                    waiting = True  # Need to wait for other loop
 
-            if lock.acquire(blocking=False):  # First to arrive, cache
-                try:  # to run the function and get the result
-                    result = await _func(*args, **kwargs)
-                except BaseException:
-                    raise  # Don't cache errors, maybe timeouts or such
-                else:  # Successfully got the result
-                    with lock_making_lock:
-                        _cache[key] = result
-                        del locks[key]  # Allow lock garbage collection
-                finally:  # Ensure lock is always released
-                    lock.release()
-                return result
+            if waiting:  # Wait for other loop, maybe across threads
+                await ensure_aw(event.wait(), loop)
+                continue
 
-            # Wait for the other thread/task to cache the result by
-            # acquiring the lock in another thread to avoid blocking the
-            # current loop. Once this is done, the loop will continue
-            # and the cached result can be retrieved.
-            await aio.get_running_loop().run_in_executor(
-                None,
-                lambda: (lock.acquire(), lock.release()),  # type: ignore
-            )
+            # First to arrive, cache the value
+            try:
+                result = await _func(*args, **kwargs)
+            except BaseException:
+                raise  # Bubble any encountered errors without caching
+            else:
+                _cache[key] = result  # Cache for other tasks
+            finally:
+                with event_making_lock:
+                    # Wake up any waiting tasks
+                    event.set()
+                    # Allow garbage collection and/or another loop to
+                    # take over caching if this failed
+                    del events[key]
+
+            return result
 
     return _wrapper  # type: ignore[return-value]
 
@@ -1229,8 +1232,8 @@ async def run_aw_threadsafe(aw: Awaitable[T], loop: Loop) -> T:
     handle any awaitable.
 
     .. warning::
-        This does not extra handling of any event loop conflicts. Use
-        :func:`ensure_aw` for that.
+        This does not handle event loop conflicts.
+        Use :func:`ensure_aw` for that.
     """
     fut = aio.run_coroutine_threadsafe(_aw_to_coro(aw), loop)
     return await aio.wrap_future(fut)
