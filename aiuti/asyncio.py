@@ -438,8 +438,10 @@ def threadsafe_async_cache(
             # acquiring the lock in another thread to avoid blocking the
             # current loop. Once this is done, the loop will continue
             # and the cached result can be retrieved.
-            await aio.get_running_loop().run_in_executor(None, lock.acquire)
-            lock.release()
+            await aio.get_running_loop().run_in_executor(
+                None,
+                lambda: (lock.acquire(), lock.release()),
+            )
 
     return _wrapper  # type: ignore[return-value]
 
