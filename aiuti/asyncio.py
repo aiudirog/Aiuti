@@ -440,7 +440,7 @@ def threadsafe_async_cache(
             # and the cached result can be retrieved.
             await aio.get_running_loop().run_in_executor(
                 None,
-                lambda: (lock.acquire(), lock.release()),
+                lambda: (lock.acquire(), lock.release()),  # type: ignore
             )
 
     return _wrapper  # type: ignore[return-value]
@@ -977,7 +977,10 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
         self.batch_timeout = batch_timeout
         self._semaphore = aio.Semaphore(value=max_concurrent_batches)
         self._loop = aio.get_running_loop()
-        self._loop_task = self._daemon_task(self._processing_loop())
+        self._loop_task = self._daemon_task(
+            self._processing_loop(),
+            name="async-bg-batcher-processing-loop",
+        )
 
     async def __call__(self,
                        arg: A_contra,
@@ -992,18 +995,22 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
     def _daemon_task(
         self,
         coro: Coroutine[Any, Any, Any],
+        name: Optional[str] = None,
     ) -> 'DaemonTask':
         """
         Helper method to create a :class:`DaemonTask` instance in the
         current event loop.
         """
-        return DaemonTask(coro, loop=self._loop)
+        return DaemonTask(coro, loop=self._loop, name=name)
 
     async def _processing_loop(self) -> None:
         while True:
             tasks = await self._get_next_batch()
             # Don't wait for the current batch to finish
-            self._daemon_task(self._process_batch(tasks))  # noqa
+            self._daemon_task(  # noqa
+                self._process_batch(tasks),
+                name="async-bg-batcher-process-batch",
+            )
 
     async def _get_next_batch(self) -> List['_TaskTuple[A_contra, R_co]']:
         """
@@ -1212,7 +1219,7 @@ def _get_loop_lock(loop: aio.AbstractEventLoop) -> Lock:
         except KeyError:  # FIRST! Create the lock
             lock = _LOOP_LOCKS[key] = Lock()
             # Ensure the lock is cleaned up when the loop is destroyed
-            finalize(loop, _LOOP_LOCKS.pop, key, None)  # type: ignore
+            finalize(loop, _LOOP_LOCKS.pop, key, None)
             return lock
 
 
