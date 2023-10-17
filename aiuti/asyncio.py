@@ -308,7 +308,7 @@ def threadsafe_async_cache(
     >>> import asyncio as aio
 
     >>> @threadsafe_async_cache
-    ... async def square(x: int):
+    ... async def square(x: int) -> int:
     ...     await aio.sleep(0.1)
     ...     print("Squaring:", x)
     ...     return x * x
@@ -316,7 +316,7 @@ def threadsafe_async_cache(
     Then we'll define a function that will use a new event loop to call
     the function 10 times in parallel:
 
-    >>> async def square_10x(x: int):
+    >>> async def square_10x(x: int) -> List[int]:
     ...     return await aio.gather(*(square(x) for _ in range(10)))
 
     And finally we'll call that function 10 times in parallel across 10
@@ -410,6 +410,10 @@ def threadsafe_async_cache(
                     # caching the value
                     loop, event = events[key]
                 except KeyError:
+                    try:  # verify nothing cached while waiting for lock
+                        return _cache[key]
+                    except KeyError:
+                        pass
                     # No existing event -> this task is going to cache
                     # the value and provide an event for others to wait
                     loop = aio.get_running_loop()
