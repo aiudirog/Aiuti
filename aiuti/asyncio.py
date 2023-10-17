@@ -337,6 +337,40 @@ def threadsafe_async_cache(
     >>> len([x for row in results for x in row])
     100
 
+    Additionally, a custom mutable mapping can be provided for the cache
+    to further customizize the implementation. For example, we can use
+    the `lru-dict <https://pypi.org/project/lru-dict/>`__ library to
+    limit the size of the cache:
+
+    >>> from lru import LRU
+    >>> cache = LRU(size=3)
+
+    >>> @threadsafe_async_cache(cache=cache)
+    ... async def double(x: int) -> int:
+    ...     await aio.sleep(0.1)
+    ...     print("Doubling:", x)
+    ...     return x * 2
+
+    >>> run = aio.get_event_loop().run_until_complete
+
+    >>> assert run(double(1)) == 2
+    Doubling: 1
+    >>> assert run(double(1)) == 2  # Cached
+
+    >>> assert run(double(2)) == 4
+    Doubling: 2
+    >>> assert run(double(2)) == 4  # Cached
+
+    >>> assert run(double(3)) == 6
+    Doubling: 3
+    >>> assert run(double(3)) == 6  # Cached
+
+    >>> assert run(double(4)) == 8  # Pushes 1 out of the cache
+    Doubling: 4
+    >>> assert run(double(4)) == 8  # Cached
+
+    >>> assert run(double(1)) == 2  # No longer cached!
+    Doubling: 1
 
     .. warning::
        The default cache is a simple dictionary and as such has no max
