@@ -305,6 +305,39 @@ def threadsafe_async_cache(
     To demonstrate this, we'll define an async function which sleeps
     to simulate work and then returns the square of the input:
 
+    >>> import asyncio as aio
+
+    >>> @threadsafe_async_cache
+    ... async def square(x: int):
+    ...     await aio.sleep(0.1)
+    ...     print("Squaring:", x)
+    ...     return x * x
+
+    Then we'll define a function that will use a new event loop to call
+    the function 10 times in parallel:
+
+    >>> def call_func(x: int):
+    ...     loop = aio.new_event_loop()
+    ...     aio.set_event_loop(loop)
+    ...     return loop.run_until_complete(aio.gather(*(
+    ...         square(x) for _ in range(10)
+    ...     )))
+
+    And finally we'll call that function 10 times in parallel across 10
+    threads:
+
+    >>> with ThreadPoolExecutor(max_workers=10) as pool:
+    ...     results = list(pool.map(call_func, [2] * 10))
+    Squaring: 2
+
+    As can be seen above, the function was only called once despite
+    being invoked 100 times across 10 threads and 10 event loops. This
+    can be confirmed by counting the total number of results:
+
+    >>> len([x for row in results for x in row])
+    100
+
+
     .. warning::
        The default cache is a simple dictionary and as such has no max
        size and can very easily be the source of memory leaks.
