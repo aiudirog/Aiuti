@@ -393,9 +393,9 @@ def threadsafe_async_cache(
 
             if waiting:  # Wait for other loop, maybe across threads
                 try:
-                    await aio.wait_for(
-                        ensure_aw(event.wait(), loop),
-                        timeout=30,
+                    await ensure_aw(
+                        aio.wait_for(event.wait(), timeout=30),
+                        loop,
                     )
                 except RuntimeError:  # Target loop most likely closed
                     pass
