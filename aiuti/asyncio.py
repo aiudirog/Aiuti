@@ -30,6 +30,8 @@ import asyncio as aio
 from asyncio import (
     QueueEmpty as AioQueueEmpty,
     TimeoutError as AioTimeoutError,
+    AbstractEventLoop as Loop,
+    run_coroutine_threadsafe as run_coro_ts,
 )
 from itertools import islice
 from threading import Lock
@@ -51,8 +53,6 @@ X = TypeVar('X')
 
 A_contra = TypeVar('A_contra', contravariant=True)
 R_co = TypeVar('R_co', covariant=True)
-
-Loop = aio.AbstractEventLoop
 
 logger = logging.getLogger(__name__)
 
@@ -395,6 +395,8 @@ def threadsafe_async_cache(
         # Get the key from the input arguments
         key = args, frozenset(kwargs.items())
 
+        running_loop = aio.get_running_loop()
+
         while True:
             # Avoid locking during this first check for performance
             try:  # to get the value from the cache
@@ -405,52 +407,77 @@ def threadsafe_async_cache(
             # Need to calculate and cache the value once
 
             with event_making_lock:
+                try:  # verify nothing cached while waiting for lock
+                    return _cache[key]
+                except KeyError:
+                    pass
+
                 try:
                     # Try to get the loop + event of the loop currently
                     # caching the value
-                    loop, event = events[key]
+                    caching_loop, event = events[key]
+                    if (caching_loop.is_closed()
+                            or not caching_loop.is_running()):
+                        raise KeyError  # Invalidate loop
                 except KeyError:
-                    try:  # verify nothing cached while waiting for lock
-                        return _cache[key]
-                    except KeyError:
-                        pass
                     # No existing event -> this task is going to cache
                     # the value and provide an event for others to wait
-                    loop = aio.get_running_loop()
+                    caching_loop = aio.get_running_loop()
                     event = aio.Event()
-                    events[key] = loop, event
-                    waiting = False
+                    events[key] = caching_loop, event
+                    do_caching = True
                 else:
-                    waiting = True  # Need to wait for other loop
+                    do_caching = False  # Need to wait for other loop
 
-            if waiting:  # Wait for other task, maybe across threads
-                if aio.get_running_loop() is loop:
-                    await event.wait()
+            if do_caching:  # No other task to wait for, cache the value
+                try:
+                    result = await _func(*args, **kwargs)
+                except Exception:
+                    raise  # Bubble any errors without caching
                 else:
-                    try:
-                        await aio.wrap_future(
-                            aio.run_coroutine_threadsafe(event.wait(), loop),
-                        )
-                    except RuntimeError:  # Target loop most likely closed
-                        pass
-                continue
+                    _cache[key] = result  # Cache for other tasks
+                finally:
+                    with event_making_lock:
+                        # Wake up any waiting tasks
+                        event.set()
+                        # Allow garbage collection and/or another loop
+                        # to take over caching if this failed
+                        del events[key]
+                return result
 
-            # First to arrive, cache the value
+            # Need to wait for another task, possibly across threads
+
+            wait_event: Awaitable[bool] = event.wait()
+            if running_loop is not caching_loop:
+                try:
+                    wait_fut = run_coro_ts(wait_event, caching_loop)
+                except RuntimeError:  # caching loop most likely closed
+                    continue  # loop around and try again
+                wait_event = aio.wrap_future(wait_fut)
+
+            # Wrap anything waiting for the event in a long timeout just
+            # to ensure nothing hangs completely if the original task is
+            # lost and somehow never sets the event
+            waiter = aio.create_task(aio.wait_for(wait_event, 60))
+
+            # wait_for will swallow CancelledErrors if the wrapped task
+            # is already finished. This can cause confusion and missed
+            # timeouts when there are multiple nested wait_fors.
+            # Shielding and handling the cancellation directly avoids
+            # this confusion by preventing this wait_for from seeing
+            # the outer CancelledError directly.
             try:
-                result = await _func(*args, **kwargs)
-            except BaseException:
-                raise  # Bubble any encountered errors without caching
-            else:
-                _cache[key] = result  # Cache for other tasks
-            finally:
-                with event_making_lock:
-                    # Wake up any waiting tasks
-                    event.set()
-                    # Allow garbage collection and/or another loop to
-                    # take over caching if this failed
-                    del events[key]
-
-            return result
+                await aio.shield(waiter)
+            except aio.TimeoutError:  # Possible original task lost?
+                pass  # Need to loop around and check
+            except (Exception, aio.CancelledError):
+                if not waiter.done():
+                    waiter.cancel()
+                    try:
+                        await waiter
+                    except aio.CancelledError:
+                        pass
+                raise
 
     return _wrapper  # type: ignore[return-value]
 
@@ -1241,8 +1268,8 @@ async def run_aw_threadsafe(aw: Awaitable[T], loop: Loop) -> T:
         This does not handle event loop conflicts.
         Use :func:`ensure_aw` for that.
     """
-    fut = aio.run_coroutine_threadsafe(_aw_to_coro(aw), loop)
-    return await aio.wrap_future(fut)
+    coro = aw if aio.iscoroutine(aw) else _aw_to_coro(aw)
+    return await aio.wrap_future(run_coro_ts(coro, loop))
 
 
 async def _aw_to_coro(aw: Awaitable[T]) -> T:

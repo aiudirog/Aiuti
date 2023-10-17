@@ -12,11 +12,14 @@ def test_canceling() -> None:
 
     @threadsafe_async_cache
     async def func() -> None:
-        await aio.sleep(0.1)
+        await aio.sleep(1)
+
+    async def impatient():
+        with pytest.raises(aio.TimeoutError):
+            await aio.wait_for(func(), 0.0001)
 
     async def main() -> None:
-        with pytest.raises(aio.TimeoutError):
-            await aio.wait_for(aio.create_task(func()), 0.0001)
+        await aio.gather(*(impatient() for _ in range(10)))
 
     with ThreadPoolExecutor(4) as pool:
         for t in [pool.submit(aio.run, main()) for _ in range(10)]:
