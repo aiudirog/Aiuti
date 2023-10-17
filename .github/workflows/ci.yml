@@ -46,6 +46,15 @@ jobs:
           - 'pypy-3.9-v7.3.12'
           - 'pypy-3.10-v7.3.12'
         os: ['ubuntu-latest', 'macOS-latest', 'windows-latest']
+        exclude:
+          - python: 'pypy-3.7'
+            os: 'windows-latest'
+          - python: 'pypy-3.8'
+            os: 'windows-latest'
+          - python: 'pypy-3.9-v7.3.12'
+            os: 'windows-latest'
+          - python: 'pypy-3.10-v7.3.12'
+            os: 'windows-latest'
     steps:
       - uses: actions/checkout@v4.1.0
       - name: Set Up Python
