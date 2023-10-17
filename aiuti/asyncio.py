@@ -410,6 +410,10 @@ def threadsafe_async_cache(
                     # caching the value
                     loop, event = events[key]
                 except KeyError:
+                    try:  # verify nothing cached while waiting for lock
+                        return _cache[key]
+                    except KeyError:
+                        pass
                     # No existing event -> this task is going to cache
                     # the value and provide an event for others to wait
                     loop = aio.get_running_loop()
@@ -419,8 +423,16 @@ def threadsafe_async_cache(
                 else:
                     waiting = True  # Need to wait for other loop
 
-            if waiting:  # Wait for other loop, maybe across threads
-                await ensure_aw(event.wait(), loop)
+            if waiting:  # Wait for other task, maybe across threads
+                if aio.get_running_loop() is loop:
+                    await event.wait()
+                else:
+                    try:
+                        await aio.wrap_future(
+                            aio.run_coroutine_threadsafe(event.wait(), loop),
+                        )
+                    except RuntimeError:  # Target loop most likely closed
+                        pass
                 continue
 
             # First to arrive, cache the value
