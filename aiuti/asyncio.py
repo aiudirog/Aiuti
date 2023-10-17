@@ -308,7 +308,7 @@ def threadsafe_async_cache(
     >>> import asyncio as aio
 
     >>> @threadsafe_async_cache
-    ... async def square(x: int):
+    ... async def square(x: int) -> int:
     ...     await aio.sleep(0.1)
     ...     print("Squaring:", x)
     ...     return x * x
@@ -316,18 +316,14 @@ def threadsafe_async_cache(
     Then we'll define a function that will use a new event loop to call
     the function 10 times in parallel:
 
-    >>> def call_func(x: int):
-    ...     loop = aio.new_event_loop()
-    ...     aio.set_event_loop(loop)
-    ...     return loop.run_until_complete(aio.gather(*(
-    ...         square(x) for _ in range(10)
-    ...     )))
+    >>> async def square_10x(x: int) -> List[int]:
+    ...     return await aio.gather(*(square(x) for _ in range(10)))
 
     And finally we'll call that function 10 times in parallel across 10
     threads:
 
     >>> with ThreadPoolExecutor(max_workers=10) as pool:
-    ...     results = list(pool.map(call_func, [2] * 10))
+    ...     results = list(pool.map(lambda x: aio.run(square_10x(x)), [2] * 10))
     Squaring: 2
 
     As can be seen above, the function was only called once despite
@@ -351,25 +347,23 @@ def threadsafe_async_cache(
     ...     print("Doubling:", x)
     ...     return x * 2
 
-    >>> run = aio.get_event_loop().run_until_complete
-
-    >>> assert run(double(1)) == 2
+    >>> assert aio.run(double(1)) == 2
     Doubling: 1
-    >>> assert run(double(1)) == 2  # Cached
+    >>> assert aio.run(double(1)) == 2  # Cached
 
-    >>> assert run(double(2)) == 4
+    >>> assert aio.run(double(2)) == 4
     Doubling: 2
-    >>> assert run(double(2)) == 4  # Cached
+    >>> assert aio.run(double(2)) == 4  # Cached
 
-    >>> assert run(double(3)) == 6
+    >>> assert aio.run(double(3)) == 6
     Doubling: 3
-    >>> assert run(double(3)) == 6  # Cached
+    >>> assert aio.run(double(3)) == 6  # Cached
 
-    >>> assert run(double(4)) == 8  # Pushes 1 out of the cache
+    >>> assert aio.run(double(4)) == 8  # Pushes 1 out of the cache
     Doubling: 4
-    >>> assert run(double(4)) == 8  # Cached
+    >>> assert aio.run(double(4)) == 8  # Cached
 
-    >>> assert run(double(1)) == 2  # No longer cached!
+    >>> assert aio.run(double(1)) == 2  # No longer cached!
     Doubling: 1
 
     .. warning::
