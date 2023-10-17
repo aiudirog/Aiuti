@@ -426,7 +426,10 @@ def threadsafe_async_cache(
                     waiting = True  # Need to wait for other loop
 
             if waiting:  # Wait for other loop, maybe across threads
-                await ensure_aw(event.wait(), loop)
+                try:
+                    await ensure_aw(event.wait(), loop)
+                except RuntimeError:  # Target loop most likely closed
+                    pass
                 continue
 
             # First to arrive, cache the value
