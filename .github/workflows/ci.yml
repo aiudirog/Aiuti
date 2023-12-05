@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.1
       - name: Set Up Python
-        uses: actions/setup-python@v4.7.1
+        uses: actions/setup-python@v4.8.0
         with:
           python-version: '3.11'
       - name: Install dependencies
@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.1
       - name: Set Up Python
-        uses: actions/setup-python@v4.7.1
+        uses: actions/setup-python@v4.8.0
         with:
           python-version: ${{ matrix.python }}
       - name: Install dependencies
@@ -81,7 +81,7 @@ jobs:
         with:
             fetch-depth: 0
       - name: Set Up Python
-        uses: actions/setup-python@v4.7.1
+        uses: actions/setup-python@v4.8.0
         with:
             python-version: '3.11'
       - name: Install dependencies
