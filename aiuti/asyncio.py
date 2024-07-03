@@ -80,19 +80,17 @@ async def gather_excs(
     ...     async for exc in excs:
     ...         print(type(exc).__name__ + ':', *exc.args)
 
-    >>> run = aio.get_event_loop().run_until_complete
-
-    >>> run(show_errors(gather_excs([x(), e()])))
+    >>> aio.run(show_errors(gather_excs([x(), e()])))
     RuntimeError: This failed
 
     A filter can be applied to the specific kind of exception to look
     for. Here, no ValueErrors were raised so there is no output:
 
-    >>> run(show_errors(gather_excs([x(), e()], only=ValueError)))
+    >>> aio.run(show_errors(gather_excs([x(), e()], only=ValueError)))
 
     Switch it to RuntimeError or a parent class and it will show again:
 
-    >>> run(show_errors(gather_excs([x(), e()], only=RuntimeError)))
+    >>> aio.run(show_errors(gather_excs([x(), e()], only=RuntimeError)))
     RuntimeError: This failed
 
     :param aws: Awaitables to gather
@@ -120,9 +118,7 @@ async def raise_first_exc(aws: Iterable[Awaitable[Any]],
     ...     await aio.sleep(0.01)
     ...     raise RuntimeError("This failed")
 
-    >>> run = aio.get_event_loop().run_until_complete
-
-    >>> run(raise_first_exc([x(), e()]))
+    >>> aio.run(raise_first_exc([x(), e()]))
     Traceback (most recent call last):
     ...
     RuntimeError: This failed
@@ -130,11 +126,11 @@ async def raise_first_exc(aws: Iterable[Awaitable[Any]],
     A filter can be applied to the specific kind of exception to look
     for. Here, no ValueErrors were raised so there is no output:
 
-    >>> run(raise_first_exc([x(), e()], only=ValueError))
+    >>> aio.run(raise_first_exc([x(), e()], only=ValueError))
 
     Switch it to RuntimeError or a parent class and it will raise again:
 
-    >>> run(raise_first_exc([x(), e()], only=RuntimeError))
+    >>> aio.run(raise_first_exc([x(), e()], only=RuntimeError))
     Traceback (most recent call last):
     ...
     RuntimeError: This failed
@@ -173,7 +169,7 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
     ...     async for name in to_async_iter(user_names()):
     ...         print(name)
 
-    >>> aio.get_event_loop().run_until_complete(print_user_names())
+    >>> aio.run(print_user_names())
     Leanne Graham
     Ervin Howell
     Clementine Bauch
@@ -508,6 +504,9 @@ def buffer_until_timeout(
     the function is invoked on the event loop that the function was
     decorated nearest.
 
+    >>> loop = aio.new_event_loop()
+    >>> aio.set_event_loop(loop)
+
     >>> @buffer_until_timeout(timeout=0.1)
     ... async def buffer(args: Set[int]):
     ...     print("Buffered:", args)
@@ -515,7 +514,7 @@ def buffer_until_timeout(
     >>> for i in range(5):
     ...     buffer(i)
 
-    >>> aio.get_event_loop().run_until_complete(aio.sleep(0.5))
+    >>> loop.run_until_complete(aio.sleep(0.5))
     Buffered: {0, 1, 2, 3, 4}
 
     Another function can also wait for all elements to be processed
@@ -528,7 +527,7 @@ def buffer_until_timeout(
     >>> for i in range(5):
     ...     buffer(i)
 
-    >>> aio.get_event_loop().run_until_complete(after_buffered())
+    >>> loop.run_until_complete(after_buffered())
     Buffered: {0, 1, 2, 3, 4}
     All buffered!
 
@@ -598,6 +597,9 @@ class BufferAsyncCalls(Generic[T]):
         Schedule the given awaitable to be be put onto the queue after
         it has been awaited.
 
+        >>> loop = aio.new_event_loop()
+        >>> aio.set_event_loop(loop)
+
         >>> @buffer_until_timeout(timeout=0.1)
         ... async def buffer(args: Set[int]):
         ...     print("Buffered:", args)
@@ -609,7 +611,7 @@ class BufferAsyncCalls(Generic[T]):
         >>> for i in range(5):
         ...     buffer.await_(delay(i))
 
-        >>> aio.get_event_loop().run_until_complete(buffer.wait())
+        >>> loop.run_until_complete(buffer.wait())
         Buffered: {0, 1, 2, 3, 4}
         """
         self._put(_awaitable_to_aiter(_arg))
@@ -618,13 +620,16 @@ class BufferAsyncCalls(Generic[T]):
         """
         Place an iterable of args onto the queue to be processed.
 
+        >>> loop = aio.new_event_loop()
+        >>> aio.set_event_loop(loop)
+
         >>> @buffer_until_timeout(timeout=0.1)
         ... async def buffer(args: Set[int]):
         ...     print("Buffered:", args)
 
         >>> buffer.map(range(5))
 
-        >>> aio.get_event_loop().run_until_complete(buffer.wait())
+        >>> loop.run_until_complete(buffer.wait())
         Buffered: {0, 1, 2, 3, 4}
 
         """
@@ -634,13 +639,16 @@ class BufferAsyncCalls(Generic[T]):
         """
         Schedule an async iterable of args to be put onto the queue.
 
+        >>> loop = aio.new_event_loop()
+        >>> aio.set_event_loop(loop)
+
         >>> @buffer_until_timeout(timeout=0.1)
         ... async def buffer(args: Set[int]):
         ...     print("Buffered:", args)
 
         >>> buffer.amap(to_async_iter(range(5)))
 
-        >>> aio.get_event_loop().run_until_complete(buffer.wait())
+        >>> loop.run_until_complete(buffer.wait())
         Buffered: {0, 1, 2, 3, 4}
 
         """
@@ -1202,13 +1210,13 @@ async def ensure_aw(aw: Awaitable[T], loop: Loop) -> T:
         The situation in which this function is necessary should be
         avoided when possible, but sometimes it is not always possible.
 
+    >>> e_loop = aio.new_event_loop()
+    >>> aio.set_event_loop(e_loop)
+
     >>> e = aio.Event()
     >>> e.set()
 
-    >>> e_loop = aio.get_event_loop()
     >>> new_loop = aio.new_event_loop()
-    >>> e_loop is not new_loop
-    True
 
     >>> def task(): return e_loop.create_task(e.wait())
 
@@ -1261,7 +1269,7 @@ def loop_in_thread(loop: Loop) -> Callable[[], None]:
 
     >>> from time import sleep
 
-    >>> loop = aio.get_event_loop()
+    >>> loop = aio.new_event_loop()
 
     >>> stop = loop_in_thread(loop)
     >>> loop.is_running()  # Running in background thread
