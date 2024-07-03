@@ -824,6 +824,7 @@ def async_background_batcher(
     max_batch_size: int = 256,
     max_concurrent_batches: int = 5,
     batch_timeout: float = 0.05,
+    retention_timeout: float = 0.1,
 ) -> Union[
     Callable[
         [_BatchFunc[A_contra, R_co]],
@@ -868,6 +869,22 @@ def async_background_batcher(
     Finished batch: [('3', 3), ('fourth', 4)]
     [2, 3, 4, 5]
 
+    If requests for the same key come through in quick succession, the result
+    will only be computed once:
+
+    >>> loop.run_until_complete(
+    ...     aio.gather(
+    ...         add_1(5), add_1(5), add_1(5),
+    ...         add_1(5, key='five'), add_1(5, key='five'),
+    ...     )
+    ... )
+    Starting batch: [('5', 5), ('five', 5)]
+    Finished batch: [('5', 5), ('five', 5)]
+    [6, 6, 6, 6, 6]
+
+    This can help avoid some headaches when there is potential for multiple
+    concurrent tasks to request the same resources.
+
     .. note::
        This method has a slight amount of extra overhead due to the
        per-argument loop batcher lookups. Initializing an
@@ -897,6 +914,7 @@ def async_background_batcher(
                 max_batch_size=max_batch_size,
                 max_concurrent_batches=max_concurrent_batches,
                 batch_timeout=batch_timeout,
+                retention_timeout=retention_timeout,
             )
         return await batcher(arg, key=key)
 
@@ -968,6 +986,25 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
        Awaits after the final yield may not execute as the processing of
        each batch is spun off as a background task and will not prevent
        the event loop from closing.
+
+    If requests for the same key come through in quick succession, the result
+    will only be computed once:
+
+    >>> async def dups():
+    ...     batched = AsyncBackgroundBatcher(add_1, max_batch_size=2)
+    ...     return await aio.gather(
+    ...         batched(1), batched(1), batched(1),
+    ...         batched(1, key='one'), batched(1, key='one'),
+    ...     )
+
+    >>> aio.run(dups())
+    Starting batch: [('1', 1), ('one', 1)]
+    Finished batch: [('1', 1), ('one', 1)]
+    [2, 2, 2, 2, 2]
+
+    This can help avoid some headaches when there is potential for multiple
+    concurrent tasks to request the same resources.
+
     """
 
     #: Async batch execution function which takes the task argument
@@ -979,6 +1016,9 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
     #: Number of seconds to wait for more elements before an
     #: incomplete batch is processed
     batch_timeout: float
+    #: Number of seconds to keep results from completed batches around
+    #: to avoid duplicate requests
+    retention_timeout: float
 
     #: Queue used to buffer all tasks to be executed
     _queue: 'aio.Queue[_TaskTuple[A_contra, R_co]]'
@@ -990,13 +1030,16 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
     #: Task running the main loop that is waiting for batches and
     #: spawning sub-tasks to process them
     _loop_task: 'DaemonTask'
+    #: Cache for recently completed futures to avoid duplicate requests
+    _retention_cache: 'dict[str, aio.Future[R_co]]'
 
     def __init__(self,
                  func: _BatchFunc[A_contra, R_co],
                  *,
                  max_batch_size: int = 256,
                  max_concurrent_batches: int = 5,
-                 batch_timeout: float = 0.05):
+                 batch_timeout: float = 0.05,
+                 retention_timeout: float = 0.1):
         """
         :param func: Batch execution function
         :param max_batch_size:
@@ -1006,12 +1049,21 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
         :param batch_timeout:
             Number of seconds to wait for more elements before an
             incomplete batch is processed
+        :param retention_timeout:
+            Number of seconds to keep results from completed batches around
+            to avoid duplicate requests
         """
         self.func = func
+
         self._queue = aio.Queue()
         self.max_batch_size = max_batch_size
         self.batch_timeout = batch_timeout
+
+        self.retention_timeout = retention_timeout
+        self._retention_cache = {}
+
         self._semaphore = aio.Semaphore(value=max_concurrent_batches)
+
         self._loop = aio.get_running_loop()
         self._loop_task = self._daemon_task(
             self._processing_loop(),
@@ -1024,9 +1076,27 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
                        key: Optional[str] = None) -> R_co:
         if key is None:
             key = str(arg)
-        fut: 'aio.Future[R_co]' = self._loop.create_future()
+
+        fut: 'aio.Future[R_co]'
+
+        try:
+            fut = self._retention_cache[key]
+        except KeyError:
+            pass
+        else:
+            return await fut
+
+        fut = self._retention_cache[key] = self._loop.create_future()
         await self._queue.put((key, arg, fut))
-        return await fut
+
+        try:
+            return await fut
+        finally:
+            self._loop.call_later(
+                self.retention_timeout,
+                self._retention_cache.pop,
+                key,
+            )
 
     def _daemon_task(
         self,
