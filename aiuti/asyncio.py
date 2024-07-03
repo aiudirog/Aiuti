@@ -546,7 +546,7 @@ def buffer_until_timeout(
     """
     if func is None:
         return partial(buffer_until_timeout, timeout=timeout)  # type: ignore
-    return wraps(func)(BufferAsyncCalls(func, timeout=timeout))
+    return wraps(func)(BufferAsyncCalls(func, timeout=timeout))  # type: ignore
 
 
 class BufferAsyncCalls(Generic[T]):

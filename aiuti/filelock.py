@@ -57,7 +57,7 @@ fcntl = _import_optional('fcntl')
 
 _logger = logging.getLogger(__name__)
 
-PathLike = Union[str, os.PathLike]
+PathLike = Union[str, 'os.PathLike[str]']
 FileLockT = TypeVar('FileLockT', bound='BaseFileLock')
 
 
