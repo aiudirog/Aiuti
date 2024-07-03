@@ -261,7 +261,7 @@ def to_sync_iter(iterable: AsyncIterable[T],
         future = pool.submit(_set_loop_and_queue_elements, loop)
         try:
             while (i := q.get()) is not _DONE:
-                yield i  # type: ignore
+                yield i
         finally:
             future.result()
 
