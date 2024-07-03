@@ -9,54 +9,31 @@ generic declarations from project to project.
 It also fallbacks for the following common new typing features to avoid
 import errors on older versions of Python:
 
-    - ``Literal``
-    - ``Protocol``
-    - ``TypedDict``
-    - ``TypeAlias``
-    - ``ParamSpec``
-    - ``ParamSpecArgs``
-    - ``ParamSpecKwargs``
-    - ``Concatenate``
+    - ``TypeAlias``  (added 3.10, deprecated 3.12)
+    - ``ParamSpec``  (added 3.10)
+    - ``ParamSpecArgs``  (added 3.10)
+    - ``ParamSpecKwargs``  (added 3.10)
+    - ``Concatenate``  (added 3.10)
 
 """
 
 __all__ = [
-    'Literal', 'Protocol', 'TypedDict', 'TypeAlias',
+    'TypeAlias',
     'ParamSpec', 'ParamSpecArgs', 'ParamSpecKwargs', 'Concatenate',
     'MaybeIter', 'MaybeAwaitable', 'Yields', 'AYields',
     'T', 'T_co', 'T_contra', 'KT', 'VT', 'KT_co', 'VT_co', 'F',
 ]
 
 import logging
+import typing
 from typing import (
-    Any, AsyncGenerator, Awaitable, Callable, Dict, Generator, Iterable,
+    Any, AsyncGenerator, Awaitable, Callable, Generator, Iterable,
     TypeVar, Union,
 )
+from warnings import warn
 
 logger = logging.getLogger(__name__)
 
-
-try:
-    from typing import Literal, Protocol, TypedDict
-except ImportError:
-    try:
-        from typing_extensions import (  # type: ignore
-            Literal, Protocol, TypedDict,
-        )
-    except ImportError:
-        # Shim implement common back ports to avoid requiring
-        # typing_extensions to be installed for regular execution.
-
-        # Note that this is not a replacement for typing_extensions which
-        # should be made a normal dependency of any packages that use newer
-        # typing features and wish to support older Python versions.
-        logger.info("Creating shims for common typing features."
-                    " Please install typing_extensions to avoid this.")
-        Literal = type('Literal', (type,),  # type: ignore
-                       {'__class_getitem__': lambda c, i: c})
-        Protocol = type('Protocol', (type,),   # type: ignore
-                        {'__class_getitem__': lambda c, i: c})
-        TypedDict = type('TypedDict', (Dict,), {})
 
 try:
     from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, Concatenate
@@ -126,3 +103,19 @@ Yields = Generator[T, None, None]
 
 #: Generic type for an ``AsyncGenerator`` which only yields
 AYields = AsyncGenerator[T, None]
+
+
+def __getattr__(name: str) -> Any:
+    if name.startswith('_'):
+        raise AttributeError(name)
+
+    if (res := getattr(typing, name, None)) is not None:
+        warn(
+            f"Typing shim for {name} is no longer necessary to support"
+            f" modern Python versions."
+            f" Please import {name} from the typing module directly.",
+            DeprecationWarning,
+        )
+        return res
+
+    raise AttributeError(name)

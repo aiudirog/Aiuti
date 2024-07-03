@@ -41,12 +41,12 @@ from weakref import WeakKeyDictionary as WeakKeyDict, finalize
 from time import sleep
 from typing import (
     Any, AsyncIterable, Awaitable, Callable, Coroutine, Dict,
-    MutableMapping, Generic, Iterable, Iterator, List, Optional, Set,
-    Tuple, Type, TypeVar, Union,
+    MutableMapping, Generic, Iterable, Iterator, List, Optional, Protocol,
+    Set, Tuple, Type, TypeVar, Union,
     overload, cast,
 )
 
-from .typing import T, Yields, AYields, Protocol
+from .typing import T, Yields, AYields
 
 E = TypeVar('E', bound=BaseException)
 X = TypeVar('X')
@@ -198,10 +198,7 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
     put = partial(loop.call_soon_threadsafe, q.put_nowait)
     with ThreadPoolExecutor(1) as pool:
         future = loop.run_in_executor(pool, _queue_elements)
-        while True:
-            i = await q.get()
-            if i is _DONE:
-                break
+        while (i := await q.get()) is not _DONE:
             yield i  # type: ignore
         await future  # Bubble any errors
 
@@ -263,11 +260,8 @@ def to_sync_iter(iterable: AsyncIterable[T],
     with ThreadPoolExecutor(1) as pool:
         future = pool.submit(_set_loop_and_queue_elements, loop)
         try:
-            while True:
-                i = q.get()
-                if i is _DONE:
-                    break
-                yield i
+            while (i := q.get()) is not _DONE:
+                yield i  # type: ignore
         finally:
             future.result()
 
@@ -668,6 +662,7 @@ class BufferAsyncCalls(Generic[T]):
         # Process all queued tasks
         # Create a task because some unknown bug on 3.7 blocks
         # infinitely sometimes if we await join directly
+        # FIXME: Evaluate if the bug is possible on 3.8+?
         await self.loop.create_task(self.q.join())
         if cancel and self._getting and not self._getting.done():
             # Cancel the current q.get to avoid waiting for timeout
