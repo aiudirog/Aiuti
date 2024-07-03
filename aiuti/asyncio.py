@@ -848,16 +848,14 @@ def async_background_batcher(
     Now we can directly call the add_1 function before the event loop
     has started, which can be more convenient:
 
-    >>> loop = aio.new_event_loop()
-    >>> aio.set_event_loop(loop)
-    >>> loop.run_until_complete(
-    ...     aio.gather(
+    >>> async def main():
+    ...     return await aio.gather(
     ...         add_1(1),
     ...         add_1(2),
     ...         add_1(3),
     ...         add_1(4, key='fourth'),
     ...     )
-    ... )
+    >>> aio.run(main())
     Starting batch: [('1', 1), ('2', 2)]
     Starting batch: [('3', 3), ('fourth', 4)]
     Finished batch: [('1', 1), ('2', 2)]
@@ -867,15 +865,16 @@ def async_background_batcher(
     If requests for the same key come through in quick succession, the result
     will only be computed once:
 
-    >>> loop.run_until_complete(
-    ...     aio.gather(
-    ...         add_1(5), add_1(5), add_1(5),
-    ...         add_1(5, key='five'), add_1(5, key='five'),
+    >>> async def dups():
+    ...     return await aio.gather(
+    ...         add_1(1), add_1(1), add_1(1),
+    ...         add_1(1, key='one'), add_1(1, key='one'),
     ...     )
-    ... )
-    Starting batch: [('5', 5), ('five', 5)]
-    Finished batch: [('5', 5), ('five', 5)]
-    [6, 6, 6, 6, 6]
+
+    >>> aio.run(dups())
+    Starting batch: [('1', 1), ('one', 1)]
+    Finished batch: [('1', 1), ('one', 1)]
+    [2, 2, 2, 2, 2]
 
     This can help avoid some headaches when there is potential for multiple
     concurrent tasks to request the same resources.
