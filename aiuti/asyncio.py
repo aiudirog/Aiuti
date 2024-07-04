@@ -827,7 +827,7 @@ def async_background_batcher(
     max_batch_size: int = 256,
     max_concurrent_batches: int = 5,
     batch_timeout: float = 0.05,
-    retention_timeout: float = 0.1,
+    retention_timeout: float = 0.,
 ) -> Union[
     Callable[
         [_BatchFunc[A_contra, R_co]],
@@ -1041,7 +1041,7 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
                  max_batch_size: int = 256,
                  max_concurrent_batches: int = 5,
                  batch_timeout: float = 0.05,
-                 retention_timeout: float = 0.1):
+                 retention_timeout: float = 0.):
         """
         :param func: Batch execution function
         :param max_batch_size:
@@ -1094,11 +1094,14 @@ class AsyncBackgroundBatcher(Generic[A_contra, R_co]):
         try:
             return await fut
         finally:
-            self._loop.call_later(
-                self.retention_timeout,
-                self._retention_cache.pop,
-                key,
-            )
+            if self.retention_timeout > 0:
+                self._loop.call_later(
+                    self.retention_timeout,
+                    self._retention_cache.pop,
+                    key,
+                )
+            else:
+                del self._retention_cache[key]
 
     def _daemon_task(
         self,
