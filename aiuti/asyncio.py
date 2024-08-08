@@ -191,7 +191,11 @@ async def to_async_iter(iterable: Iterable[T]) -> AYields[T]:
 
     q: 'aio.Queue[Union[T, object]]' = aio.Queue()
     loop = aio.get_running_loop()
-    put = partial(loop.call_soon_threadsafe, q.put_nowait)
+    put = partial(
+        loop.call_soon_threadsafe,
+        q.put_nowait,  # type: ignore[arg-type]
+        # ^ Type stubs don't understand partial will pass args later
+    )
     with ThreadPoolExecutor(1) as pool:
         future = loop.run_in_executor(pool, _queue_elements)
         while (i := await q.get()) is not _DONE:
