@@ -46,13 +46,18 @@ except ImportError:
         logger.info("Creating shims for ParamSpec typing features."
                     " Please install typing_extensions to avoid this.")
 
-        def _any_init(*_: Any, **__: Any) -> None: return None
+        def _ignore(*_: Any, **__: Any) -> None: return None
         ParamSpecArgs = type('ParamSpecArgs', (),  # type: ignore
-                             {'__init__': lambda *_, **__: None})
+                             {'__init__': _ignore})
         ParamSpecKwargs = type('ParamSpecArgs', (),  # type: ignore
-                               {'__init__': lambda *_, **__: None})
+                               {'__init__': _ignore})
         ParamSpec = type('ParamSpec', (list,),  # type: ignore
-                         {'__init__': lambda *_, **__: None,
+                         {'__init__': _ignore,
+                          '__class__': typing.TypeVar,
+                          '__call__': _ignore,
+                          '__hash__': lambda s: id(s),
+                          '__eq__': lambda s, o: s is o,
+                          '__reduce__': lambda _: 'ParamSpec',
                           'args': None, 'kwargs': None})
         Concatenate = type('Concatenate', (type,),   # type: ignore
                            {'__class_getitem__': lambda c, i: c})
